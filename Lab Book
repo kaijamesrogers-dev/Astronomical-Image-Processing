@@ -1,0 +1,5 @@
+Estimate the number of galaxies in the image and compare with histogram count to evaluate confidence.
+
+Take small regions of the image for faster analysis (and for total number estimation)
+
+Compare with existing results.

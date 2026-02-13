@@ -114,7 +114,8 @@ Lab 6
 - We added additional thresholds: The brightest pixel has to be brighter than 5 sigma, the pixels imediatly around the source have to be brighter than 4 sigma, and the pixels immediatly around that need to be greater than 3 sigma. This reduces the sources detected in the range data=data[1050:1700, 390:1300], from 576 to 292, which we believe is more accurate.
 - Deleted the code in Section 5.2.6 which excludes the edge effect pixels. I did this because it would be more simple to crop the area of the image instead.
 - Demonstrator suggested that 3 levels of filtering is overkill (in the sense that its too much computer power)
-
+- As seen in "First Overlay plot", large stars are getting detected as multiple. To counteract this, we have the idea to: find  brightest pixel, expand until reaches pixels below threshold. Then filter for size and only accept ones greater than a certain value.
+- Demonstrator mentioned that masking (ignoring objects already detecdted), might not be working
 
 
 
@@ -124,4 +125,4 @@ LAB REPORT NOTES:
 - Derive equation (1) and explain Luminosity L and evolution assumption problems
 - Error from atmospheric interferance (1 arc second smudge equivalent to 6 pixels)
 - Not count background. We want to count groups of pixels above or around threshold (even just below) as one object, but not count single pixels
-- Overplot deteccted sources on original image
+- Overplot detected sources on original image 

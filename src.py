@@ -391,10 +391,9 @@ def visualize_sources(sources, calibrated):
     # Plot 1: Original image with histogram equalization (like DS9 histogram scale)
     norm = ImageNormalize(data, stretch=HistEqStretch(data))
     im1 = axes[0].imshow(data, cmap='gray', origin='lower', norm=norm)
-    axes[0].set_title('Original Image (Histogram Stretch)')
+    axes[0].set_title('Original Image')
     axes[0].set_xlabel('X (pixels)')
     axes[0].set_ylabel('Y (pixels)')
-    plt.colorbar(im1, ax=axes[0], label='Counts')
     
     # Plot 2: Detection map (source positions)
     im2 = axes[1].imshow(detection_map, cmap='hot', origin='lower')
@@ -408,7 +407,7 @@ def visualize_sources(sources, calibrated):
     if len(sources) > 0:
         src_x = np.array([s[0] for s in sources])
         src_y = np.array([s[1] for s in sources])
-        axes[2].plot(src_x, src_y, 'r+', markersize=3, markeredgewidth=0.5, label=f'Detected ({len(sources)})')
+        axes[2].plot(src_x, src_y, 'r+', markersize=5, markeredgewidth=0.5, label=f'Detected ({len(sources)})')
         axes[2].legend()
     
     axes[2].set_title('Overlay: Original + Detections')

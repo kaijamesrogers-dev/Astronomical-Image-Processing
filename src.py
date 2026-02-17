@@ -75,32 +75,30 @@ def fit_gaussian():
 # =============================================================================
 
 # COMPLETED:
-# - Set detection threshold at 5 sigma above background
-# - Created boolean mask image to flag processed areas
-# - Iteratively found highest pixel value in unmasked regions
-# - Stored source positions (x, y) and peak values
-# - Masked circular aperture (12 pixel diameter) around each detected source
-# - Detected all sources above threshold
-# - Stored results in sources list: (x, y, peak_value)
+# - Seed pixel must be above 4 sigma to be a candidate
+# - Expanding disc: grow radius from 1 outward, compute mean of all pixels in disc
+# - Stop when disc mean falls below 3 sigma — record radius
+# - Reject sources with radius < 2 (hot pixels), no cap on radius
+# - Mask each detected source using its measured radius
+# - Stored results in sources list: (x, y, peak_value, radius)
 
 def detect_sources():
     mu, sigma = fit_gaussian()
 
-    # Detection threshold: 5 sigma above background
-    detection_threshold_5_sigma = mu + 5 * sigma
-    detection_threshold_4_sigma = mu + 4 * sigma
-    detection_threshold_3_sigma = mu + 3 * sigma
+    # Thresholds
+    seed_threshold = mu + 4 * sigma       # initial pixel must exceed this
+    disc_threshold = mu + 3 * sigma       # expanding disc average must exceed this
+    min_radius = 2                         # reject single hot pixels
 
     # Create mask image to track processed pixels
     mask = np.zeros(data.shape, dtype=bool)
+    height, width = data.shape
 
-    # List to store detected sources (x, y, peak_value)
+    # List to store detected sources (x, y, peak_value, radius)
     sources = []
 
-    # Aperture radius for masking (12 pixel diameter)
-    aperture_radius = 6
-
-    print(f"Centre pixel threshold = {detection_threshold_5_sigma:.1f}")
+    print(f"Seed threshold (4σ) = {seed_threshold:.1f}")
+    print(f"Disc threshold (3σ) = {disc_threshold:.1f}")
     print(f"Background level (mu) = {mu:.1f}, Noise (sigma) = {sigma:.1f}")
 
     # Iteratively find sources
@@ -113,41 +111,64 @@ def detect_sources():
         # Find highest pixel value
         max_value = np.max(masked_data)
 
-        # Check if above detection threshold
-        if max_value < detection_threshold_5_sigma:
+        # Check if above seed threshold
+        if max_value < seed_threshold:
             break
 
         # Find position of maximum
         max_index = np.argmax(masked_data)
         y, x = np.unravel_index(max_index, masked_data.shape)
 
-        # 3x3 patch around peak
-        patch3 = data[y-1:y+2, x-1:x+2]
-        # 5x5 patch around peak
-        patch5 = data[y-2:y+3, x-2:x+3]
+        # Expand disc outward from the peak pixel
+        # At each radius r, compute the mean of all pixels within the disc
+        found_radius = 0
+        max_expand = max(height, width)
+        for r in range(1, max_expand + 1):
+            # Define local cutout bounds around the source
+            ymin = max(0, y - r)
+            ymax = min(height, y + r + 1)
+            xmin = max(0, x - r)
+            xmax = min(width, x + r + 1)
 
-        ok_patch3 = np.all(patch3 >= detection_threshold_4_sigma)
-        ok_patch5  = np.mean(patch5) >= detection_threshold_3_sigma
+            cutout = data[ymin:ymax, xmin:xmax]
+            yy, xx = np.ogrid[ymin:ymax, xmin:xmax]
+            dist = np.sqrt((xx - x)**2 + (yy - y)**2)
 
-        if not (ok_patch3 and ok_patch5):
-            # reject this peak and move on to next-brightest
+            in_disc = dist <= r
+            disc_mean = np.mean(cutout[in_disc])
+
+            if disc_mean < disc_threshold:
+                # Disc average dropped below threshold — stop expanding
+                found_radius = r - 1
+                break
+        else:
+            # Reached image boundary without dropping below threshold
+            found_radius = r
+
+        if found_radius < min_radius:
+            # Reject: too small (likely a hot pixel)
             mask[y, x] = True
             continue
 
-        # Store source
-        sources.append((x, y, max_value))
+        # Store source with its measured radius
+        sources.append((x, y, max_value, found_radius))
 
-        # Create circular mask around source, dont understand how it works
-        yy, xx = np.ogrid[:data.shape[0], :data.shape[1]]
-        distance = np.sqrt((xx - x)**2 + (yy - y)**2)
-        mask[distance <= aperture_radius] = True
+        # Mask the detected object using its measured radius
+        ymin = max(0, y - found_radius)
+        ymax = min(height, y + found_radius + 1)
+        xmin = max(0, x - found_radius)
+        xmax = min(width, x + found_radius + 1)
+        yy, xx = np.ogrid[ymin:ymax, xmin:xmax]
+        dist = np.sqrt((xx - x)**2 + (yy - y)**2)
+        mask[ymin:ymax, xmin:xmax][dist <= found_radius] = True
 
         iteration += 1
         if iteration % 100 == 0:
             print(f"  Detected {iteration} sources...")
 
     print(f"\nDetected {len(sources)} sources above threshold")
-    print(f"Brightest source at (x={sources[0][0]}, y={sources[0][1]}) with value {sources[0][2]:.1f}")
+    if sources:
+        print(f"Brightest source at (x={sources[0][0]}, y={sources[0][1]}) with value {sources[0][2]:.1f}, radius={sources[0][3]}px")
 
     return sources, mu, sigma
 
@@ -156,34 +177,37 @@ def detect_sources():
 # =============================================================================
 
 # COMPLETED:
-# - Counted pixels within fixed aperture (diameter ~3" = 12 pixels)
-# - Used annular reference aperture for local background
+# - Used each source's measured radius as the aperture
+# - Background annulus scales with source radius (gap=2px, width=7px)
 # - Subtracted background contribution from aperture flux
 # - Calculated flux for each detected source
 
 def aperture_photometry():
     sources, mu, sigma = detect_sources()
 
-    aperture_radius = 6    # 12 pixel diameter ≈ 3 arcsec at 0.258"/pixel
-    annulus_inner = 8
-    annulus_outer = 15
+    # Annulus offset relative to each source's measured radius
+    annulus_gap = 2       # gap between aperture edge and annulus start
+    annulus_width = 7     # width of the background annulus
 
     height, width = data.shape
 
     # Build a global source mask to exclude sources from background annuli
     source_mask = np.zeros(data.shape, dtype=bool)
-    for (sx, sy, _) in sources:
-        ymin = max(0, sy - aperture_radius)
-        ymax = min(height, sy + aperture_radius + 1)
-        xmin = max(0, sx - aperture_radius)
-        xmax = min(width, sx + aperture_radius + 1)
+    for (sx, sy, _, sr) in sources:
+        ymin = max(0, sy - sr)
+        ymax = min(height, sy + sr + 1)
+        xmin = max(0, sx - sr)
+        xmax = min(width, sx + sr + 1)
         yy, xx = np.ogrid[ymin:ymax, xmin:xmax]
         dist = np.sqrt((xx - sx)**2 + (yy - sy)**2)
-        source_mask[ymin:ymax, xmin:xmax][dist <= aperture_radius] = True
+        source_mask[ymin:ymax, xmin:xmax][dist <= sr] = True
 
     results = []
 
-    for i, (x, y, peak) in enumerate(sources):
+    for i, (x, y, peak, radius) in enumerate(sources):
+        annulus_inner = radius + annulus_gap
+        annulus_outer = annulus_inner + annulus_width
+
         # Work on a local cutout around the source for efficiency
         ymin = max(0, y - annulus_outer)
         ymax = min(height, y + annulus_outer + 1)
@@ -197,8 +221,8 @@ def aperture_photometry():
         yy, xx = np.ogrid[ymin:ymax, xmin:xmax]
         dist = np.sqrt((xx - x)**2 + (yy - y)**2)
 
-        # Source aperture: sum all pixels within aperture_radius
-        in_aperture = dist <= aperture_radius
+        # Source aperture: sum all pixels within this source's measured radius
+        in_aperture = dist <= radius
         aperture_sum = np.sum(cutout[in_aperture])
         n_aperture = np.count_nonzero(in_aperture)
 
@@ -215,13 +239,12 @@ def aperture_photometry():
         bg_total = bg_per_pixel * n_aperture
         net_flux = aperture_sum - bg_total
 
-        results.append((x, y, peak, net_flux, bg_per_pixel))
+        results.append((x, y, peak, net_flux, bg_per_pixel, radius))
 
         if (i + 1) % 100 == 0:
             print(f"  Photometry for {i + 1}/{len(sources)} sources...")
 
     print(f"\nCompleted aperture photometry for {len(results)} sources")
-    print(f"Aperture radius: {aperture_radius} px, Background annulus: {annulus_inner}-{annulus_outer} px")
     print(results[0])  # print first source's photometry results for verification
 
     return results
@@ -247,7 +270,7 @@ def calibrate_fluxes():
 
     calibrated = []
 
-    for (x, y, _, net_flux, _) in results:
+    for (x, y, _, net_flux, _, _) in results:
         if net_flux < 1:
             continue  # skip sources with negligible flux (< 1 count)
 
@@ -272,7 +295,7 @@ def calibrate_fluxes():
 
 def produce_catalogue(results, calibrated):
     # Look up peak value and background from photometry results
-    result_lookup = {(x, y): (peak, bg_per_pixel) for (x, y, peak, _, bg_per_pixel) in results}
+    result_lookup = {(x, y): (peak, bg_per_pixel) for (x, y, peak, _, bg_per_pixel, _) in results}
 
     rows = []
     for (x, y, net_flux, mag, mag_err) in calibrated:
@@ -367,9 +390,9 @@ def visualize_sources(sources, calibrated):
     detection_map = np.zeros_like(data, dtype=float)
     
     # Mark each detected source
-    for (x, y, peak) in sources:
+    for (x, y, peak, radius) in sources:
         # Create a Gaussian-like marker at each source position
-        aperture_radius = 6
+        aperture_radius = radius
         ymin = max(0, y - aperture_radius)
         ymax = min(height, y + aperture_radius + 1)
         xmin = max(0, x - aperture_radius)
@@ -420,15 +443,43 @@ def visualize_sources(sources, calibrated):
     print(f"Calibrated sources: {len(calibrated)}")
 
 # =============================================================================
+# Magnitude vs Source Size
+# =============================================================================
+
+def magnitude_vs_size(sources, calibrated):
+    # Build lookup from (x, y) -> radius from sources
+    radius_lookup = {(x, y): r for (x, y, _, r) in sources}
+
+    mags = []
+    radii = []
+    for (x, y, _, mag, _) in calibrated:
+        if (x, y) in radius_lookup:
+            mags.append(mag)
+            radii.append(radius_lookup[(x, y)])
+
+    mags = np.array(mags)
+    radii = np.array(radii)
+
+    plt.figure()
+    plt.scatter(radii, mags, s=5, alpha=0.5)
+    plt.xlabel('Source Radius (pixels)')
+    plt.ylabel('Magnitude')
+    plt.title('Magnitude vs Source Size')
+    plt.gca().invert_yaxis()  # brighter objects (lower mag) at the top
+
+    print(f"Plotted {len(mags)} sources: radius range {radii.min()}-{radii.max()} px")
+
+# =============================================================================
 # Running Code
 # =============================================================================
 
 #fit_gaussian()
 sources, mu, sigma = detect_sources()
-#results = aperture_photometry()
+results = aperture_photometry()
 calibrated = calibrate_fluxes()
-#produce_catalogue(results, calibrated)
-#number_counts(calibrated)
+produce_catalogue(results, calibrated)
+number_counts(calibrated)
 visualize_sources(sources, calibrated)
+magnitude_vs_size(sources, calibrated)
 
 plt.show()

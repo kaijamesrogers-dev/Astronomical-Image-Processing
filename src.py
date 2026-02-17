@@ -76,8 +76,8 @@ def fit_gaussian():
 
 # COMPLETED:
 # - Seed pixel must be above 4 sigma to be a candidate
-# - Expanding disc: grow radius from 1 outward, compute mean of all pixels in disc
-# - Stop when disc mean falls below 3 sigma — record radius
+# - Expanding rings: grow radius from 1 outward, compute mean of each ring
+# - Stop when ring mean falls below 3 sigma — record radius
 # - Reject sources with radius < 2 (hot pixels), no cap on radius
 # - Mask each detected source using its measured radius
 # - Stored results in sources list: (x, y, peak_value, radius)
@@ -87,18 +87,17 @@ def detect_sources():
 
     # Thresholds
     seed_threshold = mu + 4 * sigma       # initial pixel must exceed this
-    disc_threshold = mu + 3 * sigma       # expanding disc average must exceed this
+    ring_threshold = mu + 3 * sigma       # expanding disc average must exceed this
     min_radius = 2                         # reject single hot pixels
 
     # Create mask image to track processed pixels
     mask = np.zeros(data.shape, dtype=bool)
-    height, width = data.shape
 
     # List to store detected sources (x, y, peak_value, radius)
     sources = []
 
     print(f"Seed threshold (4σ) = {seed_threshold:.1f}")
-    print(f"Disc threshold (3σ) = {disc_threshold:.1f}")
+    print(f"Ring threshold (3σ) = {ring_threshold:.1f}")
     print(f"Background level (mu) = {mu:.1f}, Noise (sigma) = {sigma:.1f}")
 
     # Iteratively find sources
@@ -119,26 +118,29 @@ def detect_sources():
         max_index = np.argmax(masked_data)
         y, x = np.unravel_index(max_index, masked_data.shape)
 
-        # Expand disc outward from the peak pixel
-        # At each radius r, compute the mean of all pixels within the disc
+        # Expand outward from the peak pixel in rings
+        # At each radius r, compute the mean of pixels in the ring (r-1 < dist <= r)
+        # Stop when the ring average falls below the threshold
         found_radius = 0
-        max_expand = max(height, width)
+        max_expand = max(100)
         for r in range(1, max_expand + 1):
             # Define local cutout bounds around the source
             ymin = max(0, y - r)
-            ymax = min(height, y + r + 1)
+            ymax = y + r + 1
             xmin = max(0, x - r)
-            xmax = min(width, x + r + 1)
+            xmax = x + r + 1
 
             cutout = data[ymin:ymax, xmin:xmax]
-            yy, xx = np.ogrid[ymin:ymax, xmin:xmax]
+            yy, xx = np.ogrid[ymin:ymax, xmin:xmax] # list of xy values within rectangle around peak point
             dist = np.sqrt((xx - x)**2 + (yy - y)**2)
 
-            in_disc = dist <= r
-            disc_mean = np.mean(cutout[in_disc])
+            in_ring = (dist > r - 1) & (dist <= r)
+            if np.count_nonzero(in_ring) == 0:
+                break
+            ring_mean = np.mean(cutout[in_ring])
 
-            if disc_mean < disc_threshold:
-                # Disc average dropped below threshold — stop expanding
+            if ring_mean < ring_threshold:
+                # Ring average dropped below threshold — stop expanding
                 found_radius = r - 1
                 break
         else:
@@ -352,12 +354,16 @@ def number_counts(calibrated):
     plt.figure()
     plt.errorbar(mag_plot, log10_N, yerr=log10_err, fmt='ko', markersize=4, label='Observed')
 
+    # Fit a straight line to the data: log10(N) = gradient * m + intercept
+    gradient, intercept = np.polyfit(mag_plot, log10_N, 1)
+    print(f"Measured gradient: {gradient:.4f} (theoretical: 0.6)")
+
     # Theoretical relation: log10(N) = 0.6m + constant
-    # Fit the constant to the data at a mid-range magnitude
     mid = len(mag_plot) // 2
     constant = log10_N[mid] - 0.6 * mag_plot[mid]
     mag_theory = np.linspace(mag_plot[0], mag_plot[-1], 100)
     plt.plot(mag_theory, 0.6 * mag_theory + constant, 'r--', label='Theory: 0.6m + const')
+    plt.plot(mag_theory, gradient * mag_theory + intercept, 'b--', label=f'Fit: {gradient:.4f}m + const')
 
     plt.xlabel('Magnitude')
     plt.ylabel('log$_{10}$(N(< m)) [per deg$^2$]')
@@ -376,70 +382,47 @@ def number_counts(calibrated):
 # - Overlay detection map on original image for visual comparison
 # - Show which sources were detected and their spatial distribution
 
-def visualize_sources(sources, calibrated):
+def visualise_sources(sources, calibrated, label_map):
     """
     Create detection map and overlay with original image
-    
+
     Parameters:
-    sources: list of (x, y, peak_value) tuples from detection
+    sources: list of (x, y, peak_value, radius, n_pixels) tuples
     calibrated: list of calibrated source data
+    label_map: 2D array where each pixel is labelled with its source index (-1 = background)
     """
-    height, width = data.shape
-    
-    # Create detection map: bright pixels at source locations
-    detection_map = np.zeros_like(data, dtype=float)
-    
-    # Mark each detected source
-    for (x, y, peak, radius) in sources:
-        # Create a Gaussian-like marker at each source position
-        aperture_radius = radius
-        ymin = max(0, y - aperture_radius)
-        ymax = min(height, y + aperture_radius + 1)
-        xmin = max(0, x - aperture_radius)
-        xmax = min(width, x + aperture_radius + 1)
-        
-        yy, xx = np.ogrid[ymin:ymax, xmin:xmax]
-        dist = np.sqrt((xx - x)**2 + (yy - y)**2)
-        gaussian_marker = np.exp(-(dist**2) / (2 * 3**2))  # Gaussian with sigma=3
-        
-        detection_map[ymin:ymax, xmin:xmax] += gaussian_marker
-    
-    # Normalize detection map for visualization
-    if detection_map.max() > 0:
-        detection_map = detection_map / detection_map.max() * data.max()
-    
     # Create figure with subplots
     fig, axes = plt.subplots(1, 3, figsize=(16, 5))
-    
-    # Plot 1: Original image with histogram equalization (like DS9 histogram scale)
+
+    # Plot 1: Original image with histogram equalization
     norm = ImageNormalize(data, stretch=HistEqStretch(data))
-    im1 = axes[0].imshow(data, cmap='gray', origin='lower', norm=norm)
+    axes[0].imshow(data, cmap='gray', origin='lower', norm=norm)
     axes[0].set_title('Original Image')
     axes[0].set_xlabel('X (pixels)')
     axes[0].set_ylabel('Y (pixels)')
-    
-    # Plot 2: Detection map (source positions)
-    im2 = axes[1].imshow(detection_map, cmap='hot', origin='lower')
+
+    # Plot 2: Flood-fill detection map — show actual detected regions (binary)
+    detection_map = np.zeros_like(data, dtype=float)
+    detection_map[label_map >= 0] = 1.0
+    axes[1].imshow(detection_map, cmap='gray', origin='lower', vmin=0, vmax=1)
     axes[1].set_title(f'Detected Sources (n={len(sources)})')
     axes[1].set_xlabel('X (pixels)')
     axes[1].set_ylabel('Y (pixels)')
-    plt.colorbar(im2, ax=axes[1], label='Detection Strength')
-    
-    # Plot 3: Histogram-stretched original with red detection crosses
+
+    # Plot 3: Original image with point markers at source centres
     axes[2].imshow(data, cmap='gray', origin='lower', norm=norm)
     if len(sources) > 0:
         src_x = np.array([s[0] for s in sources])
         src_y = np.array([s[1] for s in sources])
         axes[2].plot(src_x, src_y, 'r+', markersize=5, markeredgewidth=0.5, label=f'Detected ({len(sources)})')
         axes[2].legend()
-    
     axes[2].set_title('Overlay: Original + Detections')
     axes[2].set_xlabel('X (pixels)')
     axes[2].set_ylabel('Y (pixels)')
-    
+
     plt.tight_layout()
-    
-    print(f"\nVisualization created: {len(sources)} sources detected")
+
+    print(f"\nVisualisation created: {len(sources)} sources detected")
     print(f"Calibrated sources: {len(calibrated)}")
 
 # =============================================================================
@@ -448,7 +431,7 @@ def visualize_sources(sources, calibrated):
 
 def magnitude_vs_size(sources, calibrated):
     # Build lookup from (x, y) -> radius from sources
-    radius_lookup = {(x, y): r for (x, y, _, r) in sources}
+    radius_lookup = {(x, y): r for (x, y, _, r, _) in sources}
 
     mags = []
     radii = []
@@ -474,12 +457,12 @@ def magnitude_vs_size(sources, calibrated):
 # =============================================================================
 
 #fit_gaussian()
-sources, mu, sigma = detect_sources()
+sources, mu, sigma, label_map = detect_sources()
 results = aperture_photometry()
 calibrated = calibrate_fluxes()
 produce_catalogue(results, calibrated)
 number_counts(calibrated)
-visualize_sources(sources, calibrated)
+visualise_sources(sources, calibrated, label_map)
 magnitude_vs_size(sources, calibrated)
 
 plt.show()

@@ -15,99 +15,17 @@ Lab 3
 - The peak in the histogram is due to the overlay of multiple images - the edges of the resultant mosaic image have a constant background value where images don't overlap
 - Demonstrator recommendation: Use scipy.optimize.curve_fit instead of norm.fit for Gaussian fitting (provides more control and better error estimates)
 
-Statistical Significance for Source Detection
-----------------------------------------------
-How many standard deviations away from the mean background value must a pixel be to confidently identify it as a real astronomical source rather than noise?
-
 Background Statistics:
 - Image size: 4611 × 2570 pixels = 11,850,270 total pixels
 - Background mean: μ = 3421.3 counts
 - Background standard deviation: σ = 20.1 counts
 - Distribution: Approximately Gaussian
 
-Analysis:
-For a Gaussian distribution, the probability of exceeding a threshold by chance:
-- 1σ: 16% of pixels (too many false detections)
-- 2σ: 2.5% of pixels → ~296,000 false detections in this image
-- 3σ: 0.15% of pixels → ~17,775 false detections
-- 5σ: 0.00006% of pixels → ~7 false detections
-
-Detection Thresholds for this image:
-- 2σ threshold: 3421.3 + 2(20.1) = 3461.5 counts
-- 3σ threshold: 3421.3 + 3(20.1) = 3481.6 counts
-- 5σ threshold: 3421.3 + 5(20.1) = 3521.8 counts
-
-Conclusion:
-A minimum of 2σ is required to distinguish sources from noise, as lower thresholds produce too many false positives. In practice, 3-5σ is standard in astronomy:
-- 3σ: Good balance between detecting faint sources and limiting false detections
-- 5σ: Very reliable detections, but may miss fainter sources
-
-The large number of pixels (12 million) means even statistically rare events occur frequently, necessitating higher thresholds. Real sources are further distinguished by having multiple adjacent pixels above threshold, not just isolated high-value pixels. The number of standard deviations does not have to be integer.
-
-Lab 4
-Discussion with Demonstrator: Edge Effects and Bright Points
---------------------------------------------------------------
-Possible approaches for dealing with edge effects and bright points:
-1. Masking: Can mask the bright bits to exclude them from analysis
-2. Cropping: Can crop the image to remove border regions and only focus on subregions of the image
-
-Important caveat:
-- Problem with excluding the outlying value in the histogram fit: real astronomical objects are also deleted, not just background noise
-- Need to balance removing artifacts while preserving genuine sources
-
-Section 5.3: Source Detection
------------------------------
-Implementation:
-- Used a 5-sigma detection threshold above the fitted background mean (threshold = mu + 5*sigma)
-- Created a boolean mask image (same dimensions as data) to track which pixels have already been assigned to a source
-- Iterative peak-finding algorithm:
-  1. Find the brightest unmasked pixel in the image
-  2. If it exceeds the threshold, record its (x, y) position and peak value
-  3. Mask a circular aperture of 12-pixel diameter around the detected source to prevent re-detection
-  4. Repeat until no unmasked pixel exceeds the threshold
-- Sources are stored as a list of (x, y, peak_value) tuples, sorted brightest-first by construction
-
-Notes:
-- The circular masking uses np.ogrid to compute distances from the source centre to all pixels — this is recomputed each iteration (could be optimised but is clear and correct)
-- Masking prevents double-counting of bright sources but the fixed 12-pixel diameter may under-mask extended objects or over-mask in crowded fields
-- The 5-sigma threshold gives very reliable detections (~7 false positives expected across the full image) but will miss the faintest real sources
-
-Section 5.4: Source Photometry ✓
----------------------------------
-Concept — Aperture Photometry:
-- For each detected source, sum all pixel values within a fixed circular aperture (diameter 3" ≈ 12 pixels at 0.258"/pixel plate scale)
-- Estimate the local background using an annular region surrounding the source aperture
-- Background per pixel = (total counts in annulus, excluding other sources) / (number of uncontaminated annulus pixels)
-- Net source flux = (sum of pixels in aperture) - (background per pixel × number of aperture pixels)
-
-Key consideration — the annulus may contain other real sources, which must be excluded to avoid overestimating the background level.
-
-Questions and Answers:
-
-Q: What problems would you expect from using ever larger apertures?
-A: Several issues arise as aperture size increases:
-1. Noise accumulation: Larger apertures include more background pixels, so the total background noise (which scales as sigma × sqrt(N_pixels)) grows. For faint sources this can drown the signal entirely, reducing the signal-to-noise ratio.
-2. Source contamination/blending: In crowded fields, a large aperture will overlap neighbouring sources, adding their flux to the measurement and making it impossible to isolate individual objects.
-3. Background estimation errors: A larger source aperture means the background annulus must be pushed further out, where the local background may differ from the background at the source position (e.g. due to large-scale gradients or nearby bright objects).
-4. Systematic over-estimation of flux: Including pixels far from the source centre that contain essentially no source light but do contribute noise biases the measurement.
-
-Q: Can you think of alternative approaches to aperture photometry that might avoid these problems?
-A: Several alternatives exist:
-1. PSF (Point Spread Function) fitting photometry: Model the expected shape of a point source (the PSF) and fit it to each detection. This naturally handles the wings of the source profile, works well in crowded fields, and gives optimal signal-to-noise for point sources. Used by tools like DAOPHOT.
-2. Isophotal photometry: Define the source boundary by a surface brightness contour (isophote) rather than a fixed circle. This adapts to the actual extent of each object, capturing more flux for extended sources without including unnecessary background.
-3. Kron/Petrosian apertures: Use an adaptive aperture whose radius scales with the source's own light profile (e.g. 2.5× the Kron radius). This captures a fixed fraction of total flux regardless of source size. Used by SExtractor.
-4. Profile fitting for extended sources: Fit analytic models (e.g. Sérsic profiles) to galaxies to extrapolate the total flux, even beyond what is directly measured.
-
-Section 5.5: Calibrating the Fluxes
-------------------------------------
-- The FITS header contains pre-computed calibration values from standard star observations:
-  - MAGZPT: the instrumental zero point (magnitude corresponding to 1 count/second)
-  - MAGZRR: the error on the zero point calibration
-- Conversion from net flux (counts) to calibrated magnitude uses:
-  m = MAGZPT - 2.5 * log10(net_flux)
-  This combines the instrumental magnitude (mag_i = -2.5 * log10(counts)) with the zero point in one step.
-- The magnitude error on each source is set to MAGZRR (the zero point calibration uncertainty)
-- Sources with non-positive net flux are excluded — these arise when the background subtraction exceeds the aperture sum, indicating the "source" is likely noise or an artifact
+Gaussian distribution:
+- 1σ: 16% of pixels
+- 2σ: 2.5% of pixels
+- 3σ: 0.15% of pixels
+- 5σ: 0.00006% of pixels
 
 Lab 6
 - The source detection is counting single pixels, however the image is taken from Earth, in which the atmosphere interferes. It spreads the light 1 arcsecond which is equivelant to 6 pixels.
@@ -118,11 +36,8 @@ Lab 6
 - Demonstrator mentioned that masking (ignoring objects already detecdted), might not be working
 
 
-
-
-
-LAB REPORT NOTES:
-- Derive equation (1) and explain Luminosity L and evolution assumption problems
-- Error from atmospheric interferance (1 arc second smudge equivalent to 6 pixels)
-- Not count background. We want to count groups of pixels above or around threshold (even just below) as one object, but not count single pixels
-- Overplot detected sources on original image 
+Lab 7
+- Start at initial pixel and bloom out, compare average brightness to threshold, and stop once average is below certain threshold. This will ensure large objects are not counted more than once.
+- We did this and counted 287 objects.
+- We noticed we were failing to detect sources because the average of the pixels would be above the threshold, for a slightly greater radius than the true radius. This would also cause near by stars to be made False, so they dont get detected. [commit 7-1]
+- We thought we could have a ring expanding instead, that was the high value pixels in the centre of the object would not interfere as much with when the radius stops expanding. We got 487 sources detected. We think this may be overcounting. Due to the ring expanding in a circle, and sources that arnt a circle would end up be counted multiple times. [commit 7-2]

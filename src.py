@@ -76,8 +76,8 @@ def fit_gaussian():
 
 # COMPLETED:
 # - Seed pixel must be above 4 sigma to be a candidate
-# - Expanding disc: grow radius from 1 outward, compute mean of all pixels in disc
-# - Stop when disc mean falls below 3 sigma — record radius
+# - Expanding rings: grow radius from 1 outward, compute mean of each ring
+# - Stop when ring mean falls below 3 sigma — record radius
 # - Reject sources with radius < 2 (hot pixels), no cap on radius
 # - Mask each detected source using its measured radius
 # - Stored results in sources list: (x, y, peak_value, radius)
@@ -119,8 +119,9 @@ def detect_sources():
         max_index = np.argmax(masked_data)
         y, x = np.unravel_index(max_index, masked_data.shape)
 
-        # Expand disc outward from the peak pixel
-        # At each radius r, compute the mean of all pixels within the disc
+        # Expand outward from the peak pixel in rings
+        # At each radius r, compute the mean of pixels in the ring (r-1 < dist <= r)
+        # Stop when the ring average falls below the threshold
         found_radius = 0
         max_expand = max(height, width)
         for r in range(1, max_expand + 1):
@@ -134,11 +135,13 @@ def detect_sources():
             yy, xx = np.ogrid[ymin:ymax, xmin:xmax]
             dist = np.sqrt((xx - x)**2 + (yy - y)**2)
 
-            in_disc = dist <= r
-            disc_mean = np.mean(cutout[in_disc])
+            in_ring = (dist > r - 1) & (dist <= r)
+            if np.count_nonzero(in_ring) == 0:
+                break
+            ring_mean = np.mean(cutout[in_ring])
 
-            if disc_mean < disc_threshold:
-                # Disc average dropped below threshold — stop expanding
+            if ring_mean < disc_threshold:
+                # Ring average dropped below threshold — stop expanding
                 found_radius = r - 1
                 break
         else:

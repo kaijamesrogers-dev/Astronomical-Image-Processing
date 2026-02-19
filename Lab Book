@@ -41,3 +41,11 @@ Lab 7
 - We did this and counted 287 objects.
 - We noticed we were failing to detect sources because the average of the pixels would be above the threshold, for a slightly greater radius than the true radius. This would also cause near by stars to be made False, so they dont get detected. [commit 7-1]
 - We thought we could have a ring expanding instead, that was the high value pixels in the centre of the object would not interfere as much with when the radius stops expanding. We got 487 sources detected. We think this may be overcounting. Due to the ring expanding in a circle, and sources that arnt a circle would end up be counted multiple times. [commit 7-2]
+
+Lab 8
+- need to compare results to our model (the equation), and other peoples results.
+- Demonstrator said we need to make our detection algorithm more sophisticated, this could be by adding an additional rule for detecting, or adjusting what we already have. We want confidence that our results represent whats in the image.
+- For higher magnitudes (lower brightness), we have a threshold for how low magnitudes we detect, so we dont want to include points we dont detect in out fit. For lower magnitude brighter stars, we want to do a weighted fit as they have greater error bars.
+- Should use a local background/histogram instead.
+- Problem to solve: elipse is being counted as multiple objects.
+- Solution: Instead of masking out the circle of the radius of the object. Mask out a circle of radius = radius_detected * k, where k = 1.5 - 2. [commit 8-1]

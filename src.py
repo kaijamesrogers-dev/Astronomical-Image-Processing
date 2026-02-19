@@ -86,8 +86,8 @@ def detect_sources():
     mu, sigma = fit_gaussian()
 
     # Thresholds
-    seed_threshold = mu + 4 * sigma       # initial pixel must exceed this
-    ring_threshold = mu + 3 * sigma       # expanding disc average must exceed this
+    seed_threshold = mu + 3 * sigma       # initial pixel must exceed this
+    ring_threshold = mu + 2 * sigma       # expanding disc average must exceed this
     min_radius = 2                         # reject single hot pixels
 
     # Create mask image to track processed pixels
@@ -192,10 +192,6 @@ def detect_sources():
 def aperture_photometry():
     sources, mu, sigma = detect_sources()
 
-    # Annulus offset relative to each source's measured radius
-    annulus_gap = 2       # gap between aperture edge and annulus start
-    annulus_width = 7     # width of the background annulus
-
     height, width = data.shape
 
     # Build a global source mask to exclude sources from background annuli
@@ -212,8 +208,8 @@ def aperture_photometry():
     results = []
 
     for i, (x, y, peak, radius) in enumerate(sources):
-        annulus_inner = radius + annulus_gap
-        annulus_outer = annulus_inner + annulus_width
+        annulus_inner = int(np.floor(radius * 1.2))
+        annulus_outer = int(np.ceil(radius * 3))
 
         # Work on a local cutout around the source for efficiency
         ymin = max(0, y - annulus_outer)
@@ -387,70 +383,48 @@ def number_counts(calibrated):
 # - Overlay detection map on original image for visual comparison
 # - Show which sources were detected and their spatial distribution
 
-def visualize_sources(sources, calibrated):
-    """
-    Create detection map and overlay with original image
-    
-    Parameters:
-    sources: list of (x, y, peak_value) tuples from detection
-    calibrated: list of calibrated source data
-    """
+def visualise_sources(sources, calibrated):
     height, width = data.shape
-    
-    # Create detection map: bright pixels at source locations
-    detection_map = np.zeros_like(data, dtype=float)
-    
-    # Mark each detected source
-    for (x, y, peak, radius) in sources:
-        # Create a Gaussian-like marker at each source position
-        aperture_radius = radius
-        ymin = max(0, y - aperture_radius)
-        ymax = min(height, y + aperture_radius + 1)
-        xmin = max(0, x - aperture_radius)
-        xmax = min(width, x + aperture_radius + 1)
-        
-        yy, xx = np.ogrid[ymin:ymax, xmin:xmax]
-        dist = np.sqrt((xx - x)**2 + (yy - y)**2)
-        gaussian_marker = np.exp(-(dist**2) / (2 * 3**2))  # Gaussian with sigma=3
-        
-        detection_map[ymin:ymax, xmin:xmax] += gaussian_marker
-    
-    # Normalize detection map for visualization
-    if detection_map.max() > 0:
-        detection_map = detection_map / detection_map.max() * data.max()
-    
+
     # Create figure with subplots
-    fig, axes = plt.subplots(1, 3, figsize=(16, 5))
-    
-    # Plot 1: Original image with histogram equalization (like DS9 histogram scale)
+    _, axes = plt.subplots(1, 3, figsize=(16, 5))
+
+    # Plot 1: Original image with histogram equalization
     norm = ImageNormalize(data, stretch=HistEqStretch(data))
-    im1 = axes[0].imshow(data, cmap='gray', origin='lower', norm=norm)
+    axes[0].imshow(data, cmap='gray', origin='lower', norm=norm)
     axes[0].set_title('Original Image')
     axes[0].set_xlabel('X (pixels)')
     axes[0].set_ylabel('Y (pixels)')
-    
-    # Plot 2: Detection map (source positions)
-    im2 = axes[1].imshow(detection_map, cmap='hot', origin='lower')
+
+    # Plot 2: Detected sources as white circles on black — binary detection map
+    detection_map = np.zeros((height, width), dtype=float)
+    for (x, y, _, r) in sources:
+        ymin = max(0, y - r)
+        ymax = min(height, y + r + 1)
+        xmin = max(0, x - r)
+        xmax = min(width, x + r + 1)
+        yy, xx = np.ogrid[ymin:ymax, xmin:xmax]
+        dist = np.sqrt((xx - x)**2 + (yy - y)**2)
+        detection_map[ymin:ymax, xmin:xmax][dist <= r] = 1.0
+    axes[1].imshow(detection_map, cmap='gray', origin='lower', vmin=0, vmax=1)
     axes[1].set_title(f'Detected Sources (n={len(sources)})')
     axes[1].set_xlabel('X (pixels)')
     axes[1].set_ylabel('Y (pixels)')
-    plt.colorbar(im2, ax=axes[1], label='Detection Strength')
-    
-    # Plot 3: Histogram-stretched original with red detection crosses
+
+    # Plot 3: Original image with point markers at source centres
     axes[2].imshow(data, cmap='gray', origin='lower', norm=norm)
     if len(sources) > 0:
         src_x = np.array([s[0] for s in sources])
         src_y = np.array([s[1] for s in sources])
         axes[2].plot(src_x, src_y, 'r+', markersize=5, markeredgewidth=0.5, label=f'Detected ({len(sources)})')
         axes[2].legend()
-    
     axes[2].set_title('Overlay: Original + Detections')
     axes[2].set_xlabel('X (pixels)')
     axes[2].set_ylabel('Y (pixels)')
-    
+
     plt.tight_layout()
-    
-    print(f"\nVisualization created: {len(sources)} sources detected")
+
+    print(f"\nVisualisation created: {len(sources)} sources detected")
     print(f"Calibrated sources: {len(calibrated)}")
 
 # =============================================================================
@@ -490,7 +464,7 @@ results = aperture_photometry()
 calibrated = calibrate_fluxes()
 produce_catalogue(results, calibrated)
 number_counts(calibrated)
-visualize_sources(sources, calibrated)
+visualise_sources(sources, calibrated)
 magnitude_vs_size(sources, calibrated)
 
 plt.show()

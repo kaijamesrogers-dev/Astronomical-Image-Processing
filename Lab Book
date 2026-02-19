@@ -48,4 +48,7 @@ Lab 8
 - For higher magnitudes (lower brightness), we have a threshold for how low magnitudes we detect, so we dont want to include points we dont detect in out fit. For lower magnitude brighter stars, we want to do a weighted fit as they have greater error bars.
 - Should use a local background/histogram instead.
 - Problem to solve: elipse is being counted as multiple objects.
-- Solution: Instead of masking out the circle of the radius of the object. Mask out a circle of radius = radius_detected * k, where k = 1.5 - 2. [commit 8-1]
+- Solution: Instead of masking out the circle of the radius of the object. Mask out a circle of radius = radius_detected * k, where k = 1.5 - 2. [commit 8-1].
+- This still detected elipses as multiple sources, despite, visually, the minor radius of the elipse * 1.5 being greater than the major radius. This suggests that the radius is too small. So I decided to decrease the threshold of the ring. I decreased the ring threshold from 3 sigma -> 2 sigma. This improved visual results and decreased sources detected from 487 -> 261. This slighly improved the gradient from 0.239 -> 0.247.
+- Noticed some objects werent getting detected, decreased the seed detection threshold from 4 sigma -> 3 sigma, which increased the count from 261 -> 373. I noticed it was still failing to detect some sources.
+- To add the local backgrounds, I am going to detect the brightest source based off the whole area, then finding the local background, and then checking the seded ocmpared to the local background. i have not done this yet. [commit 8-2]

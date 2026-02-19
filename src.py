@@ -137,9 +137,9 @@ def detect_sources():
             in_ring = (dist > r - 1) & (dist <= r)
             if np.count_nonzero(in_ring) == 0:
                 break
-            ring_mean = np.mean(cutout[in_ring])
+            ring_median = np.median(cutout[in_ring])
 
-            if ring_mean < ring_threshold:
+            if ring_median < ring_threshold:
                 # Ring average dropped below threshold — stop expanding
                 found_radius = r - 1
                 break

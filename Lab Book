@@ -56,5 +56,18 @@ Lab 8
 
 Lab 9
 - made the magnitude fit a weighted fit, and it decreased the gradient.
-- Some objects were sill being double counted. I think this is because the boolean map is used to mask out for the seed detection, but is not masked out for the ring expansion. I changede it so it uses the masked_data when expanding the ring. This improved visual results. Decreased the number of detections 344 -> 292. (seed_threshold = mu + 3 * sigma       # initial pixel must exceed this
-    ring_threshold = mu + 2.5 * sigma) [commit 9-1]
+- Some objects were sill being double counted. I think this is because the boolean map is used to mask out for the seed detection, but is not masked out for the ring expansion. I changede it so it uses the masked_data when expanding the ring. This improved visual results. Decreased the number of detections 344 -> 292. (seed_threshold = mu + 3 * sigma, ring_threshold = mu + 2.5 * sigma) [commit 9-1]
+- Need to make simulated image with known values, to test code. Could calculate uncerainty of code from results? Add overlapping sources, and elipse shape sources in simulation.
+- What is the zero point uncertainty used for?
+- How to convert magnitude uncertainties (from code detection  method uncertainty, and zero point magnitude uncertainty) into number of sources detected uncertainty. 
+- The magnitude plot should use non normalised y axis to help understanding, but for final plot should use same axis' that proffesional figures use.
+- Our magnitude values are shifted (they are too high), this is due to our flux not being accurate, due to a gain, and not accounting for time.
+- We will plot a non-accumalitive magnitude plot to help out understanding. 
+- We should have a minimum radius value. We can skip to the minimum radius value, check that the median or the area of the circle is greater than the threshold, if yes, expand a ring from there. <- I changed the minimum radius to 6, however i have not done the skip to 6 and do circle area thing yet, which would make the code run faster. This decreased the sourcxes detected 292 -> 63 for sigma_seed = 3, sigma_ring = 2.
+- We need to account for exposure time and gain in the magnitude values (eg on the number counts per magnitude bin plot)
+- We should still detect high magnitude objects (really small and dim) but then store the radius as 6.
+- Use the number counts histogram to justify exluding data on the cumulative number counts plot. Low magnitude data on histogram is not great because of counting statistics (only detect around 1 object)
+- You dont need to implement everything, if its faster to quanity the uncertainty something has, than coding to mitigate that, then just quanify the uncertainty.
+- Its not that sources that we detect that are under 6 pixels in radius dont count. Its that sources that we detect to have a radius < 6, we should still count them, but when calculating the flux, the radius should be measured from a minimum of 6 pixels, because its spread to 6 pixels, but its jsut hidden in the background. Basically the radius is probably greater that what we are detecting now.
+- Maybe we could compare one ring standard deviation to the next iteration ring standard deviation, and say when it doesnt change anymore its reached background.
+- [commit 9-2]

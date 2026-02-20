@@ -9,11 +9,18 @@ import numpy as np
 from astropy.visualization import ZScaleInterval, LogStretch, HistEqStretch, ImageNormalize
 
 # =============================================================================
+# Toggle: switch between the real image and the simulation
+# =============================================================================
+
+USE_SIMULATION = False   # ← change to False to run on the real mosaic.fits
+
+# =============================================================================
 # Section 5.2: Reading the Data
 # =============================================================================
 
 # import data
-hdulist = fits.open("mosaic.fits")
+fits_file = "sim_mosaic.fits" if USE_SIMULATION else "mosaic.fits"
+hdulist = fits.open(fits_file)
 data = hdulist[0].data
 header = hdulist[0].header
 
@@ -87,8 +94,8 @@ def detect_sources():
 
     # Thresholds
     seed_threshold = mu + 3 * sigma       # initial pixel must exceed this
-    ring_threshold = mu + 2.5 * sigma       # expanding disc average must exceed this
-    min_radius = 2                         # reject single hot pixels
+    ring_threshold = mu + 2.0 * sigma       # expanding disc average must exceed this
+    min_radius = 6                         # reject single hot pixels
 
     # Create mask image to track processed pixels
     mask = np.zeros(data.shape, dtype=bool)
@@ -147,7 +154,7 @@ def detect_sources():
             # Reached image boundary without dropping below threshold
             found_radius = r
 
-        if found_radius < min_radius:
+        if found_radius <= min_radius:
             # Reject: too small (likely a hot pixel)
             mask[y, x] = True
             continue
@@ -339,16 +346,13 @@ def number_counts(calibrated):
     # Cumulative counts: N(< m) for each bin edge
     N_cumulative = np.array([np.sum(mags <= m) for m in mag_bins])
 
-    # Only keep bins with at least 1 source
-    valid = N_cumulative > 0
+    # Only keep bins with at least 1 source and magnitude <= 18
+    valid = (N_cumulative > 0) #& (mag_bins <= 18)
     mag_plot = mag_bins[valid]
     N_raw = N_cumulative[valid]
 
-    # Normalize to per square degree
-    N_per_deg2 = N_raw / area_deg2
-
     # Poisson error bars propagated to log10: sigma_log10 = 1 / (sqrt(N) * ln(10))
-    log10_N = np.log10(N_per_deg2)
+    log10_N = np.log10(N_raw)
     log10_err = 1.0 / (np.sqrt(N_raw) * np.log(10))
 
     # Plot number counts
@@ -368,12 +372,40 @@ def number_counts(calibrated):
     plt.plot(mag_theory, gradient * mag_theory + intercept, 'b--', label=f'Fit: {gradient:.4f}m + const')
 
     plt.xlabel('Magnitude')
-    plt.ylabel('log$_{10}$(N(< m)) [per deg$^2$]')
+    plt.ylabel('log$_{10}$(N(< m))')
     plt.legend()
     plt.title('Cumulative Number Counts')
 
     print(f"Magnitude range: {mags.min():.2f} to {mags.max():.2f}")
     print(f"Total sources: {len(mags)}")
+
+def number_counts_histogram(calibrated):
+    detected_mags = np.array([mag for (_, _, _, mag, _) in calibrated])
+
+    plt.figure()
+
+    if USE_SIMULATION:
+        # Load simulated catalogue written by the simulation script
+        sim = np.loadtxt('sim_catalogue.csv', comments='#')
+        sim_mags = sim[:, 2]   # mag_true column
+
+        all_mags = np.concatenate([sim_mags, detected_mags])
+        mag_bins = np.arange(np.floor(all_mags.min()), np.ceil(all_mags.max()) + 0.5, 0.5)
+
+        plt.hist(sim_mags,   bins=mag_bins, alpha=0.55, color='steelblue',
+                 label=f'Simulated ({len(sim_mags)} sources)')
+        plt.hist(detected_mags, bins=mag_bins, alpha=0.70, color='tomato',
+                 label=f'Detected ({len(detected_mags)} sources)')
+        plt.title('Histogram: Simulated vs Detected Sources (Simulation)')
+    else:
+        mag_bins = np.arange(np.floor(detected_mags.min()), np.ceil(detected_mags.max()) + 0.5, 0.5)
+        plt.hist(detected_mags, bins=mag_bins, color='steelblue',
+                 label=f'Detected ({len(detected_mags)} sources)')
+        plt.title('Number Counts per Magnitude Bin')
+
+    plt.xlabel('Magnitude')
+    plt.ylabel('Number of sources')
+    plt.legend()
 
 # =============================================================================
 # Source Detection Visualization
@@ -465,6 +497,7 @@ results = aperture_photometry()
 calibrated = calibrate_fluxes()
 produce_catalogue(results, calibrated)
 number_counts(calibrated)
+number_counts_histogram(calibrated)
 visualise_sources(sources, calibrated)
 magnitude_vs_size(sources, calibrated)
 

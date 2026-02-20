@@ -53,3 +53,8 @@ Lab 8
 - Noticed some objects werent getting detected, decreased the seed detection threshold from 4 sigma -> 3 sigma, which increased the count from 261 -> 393. I noticed it was still failing to detect some sources.
 - To add the local backgrounds, I am going to detect the brightest source based off the whole area, then finding the local background, and then checking the seded ocmpared to the local background. i have not done this yet. [commit 8-2]
 - Changed the code, so it calculated the median instead of the mean. This was to stop the radius being greater than its true value. When the sources overlap, it can cause the mean to be higher than it should be, but the median can fix this. [commit 8-3]
+
+Lab 9
+- made the magnitude fit a weighted fit, and it decreased the gradient.
+- Some objects were sill being double counted. I think this is because the boolean map is used to mask out for the seed detection, but is not masked out for the ring expansion. I changede it so it uses the masked_data when expanding the ring. This improved visual results. Decreased the number of detections 344 -> 292. (seed_threshold = mu + 3 * sigma       # initial pixel must exceed this
+    ring_threshold = mu + 2.5 * sigma) [commit 9-1]

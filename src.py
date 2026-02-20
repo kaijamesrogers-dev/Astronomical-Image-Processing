@@ -87,7 +87,7 @@ def detect_sources():
 
     # Thresholds
     seed_threshold = mu + 3 * sigma       # initial pixel must exceed this
-    ring_threshold = mu + 2 * sigma       # expanding disc average must exceed this
+    ring_threshold = mu + 2.5 * sigma       # expanding disc average must exceed this
     min_radius = 2                         # reject single hot pixels
 
     # Create mask image to track processed pixels
@@ -130,7 +130,7 @@ def detect_sources():
             xmin = max(0, x - r)
             xmax = min(width, x + r + 1)
 
-            cutout = data[ymin:ymax, xmin:xmax]
+            cutout = masked_data[ymin:ymax, xmin:xmax]
             yy, xx = np.ogrid[ymin:ymax, xmin:xmax] # list of xy values within rectangle around peak point
             dist = np.sqrt((xx - x)**2 + (yy - y)**2)
 
@@ -355,8 +355,9 @@ def number_counts(calibrated):
     plt.figure()
     plt.errorbar(mag_plot, log10_N, yerr=log10_err, fmt='ko', markersize=4, label='Observed')
 
-    # Fit a straight line to the data: log10(N) = gradient * m + intercept
-    gradient, intercept = np.polyfit(mag_plot, log10_N, 1)
+    # Fit a straight line to the weighted data: log10(N) = gradient * m + intercept
+    w = 1.0 / log10_err                      # weights for polyfit are 1/sigma
+    gradient, intercept = np.polyfit(mag_plot, log10_N, 1, w=w)
     print(f"Measured gradient: {gradient:.4f} (theoretical: 0.6)")
 
     # Theoretical relation: log10(N) = 0.6m + constant

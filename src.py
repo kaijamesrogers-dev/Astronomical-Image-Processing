@@ -1,26 +1,15 @@
-# =============================================================================
-# Astronomical Image Processing
-# =============================================================================
-
 from astropy.io import fits
 import matplotlib.pyplot as plt
 from scipy.optimize import curve_fit
 import numpy as np
-from astropy.visualization import ZScaleInterval, LogStretch, HistEqStretch, ImageNormalize
-
-# =============================================================================
-# Toggle: switch between the real image and the simulation
-# =============================================================================
-
-USE_SIMULATION = False   # ← change to False to run on the real mosaic.fits
+from astropy.visualization import HistEqStretch, ImageNormalize
 
 # =============================================================================
 # Section 5.2: Reading the Data
 # =============================================================================
 
 # import data
-fits_file = "sim_mosaic.fits" if USE_SIMULATION else "mosaic.fits"
-hdulist = fits.open(fits_file)
+hdulist = fits.open("mosaic.fits")
 data = hdulist[0].data
 header = hdulist[0].header
 
@@ -31,7 +20,7 @@ crop_region = (slice(1050, 1700), slice(390, 1300))
 data = data[crop_region]
 
 # print header and data
-#print(header)
+print(header)
 #print(data)
 
 # =============================================================================
@@ -89,13 +78,11 @@ def fit_gaussian():
 # - Mask each detected source using its measured radius
 # - Stored results in sources list: (x, y, peak_value, radius)
 
-def detect_sources():
-    mu, sigma = fit_gaussian()
-
+def detect_sources(mu, sigma):
     # Thresholds
     seed_threshold = mu + 3 * sigma       # initial pixel must exceed this
     ring_threshold = mu + 2.0 * sigma       # expanding disc average must exceed this
-    min_radius = 6                         # reject single hot pixels
+    min_radius = 1                         # reject single hot pixels
 
     # Create mask image to track processed pixels
     mask = np.zeros(data.shape, dtype=bool)
@@ -105,7 +92,6 @@ def detect_sources():
 
     print(f"Seed threshold (4σ) = {seed_threshold:.1f}")
     print(f"Ring threshold (3σ) = {ring_threshold:.1f}")
-    print(f"Background level (mu) = {mu:.1f}, Noise (sigma) = {sigma:.1f}")
 
     # Iteratively find sources
     iteration = 0
@@ -159,30 +145,32 @@ def detect_sources():
             mask[y, x] = True
             continue
 
-        # Store source with its measured radius
-        sources.append((x, y, max_value, found_radius))
-
-        # Mask the detected object using its measured radius * k
+        # Extend the radius by a factor to ensure we mask the entire source (including wings)
         k = 1.5
-        R_excl = int(np.ceil(k * found_radius))
+        radius = int(k * found_radius)
 
-        ymin2 = max(0, y - R_excl)
-        ymax2 = min(height, y + R_excl + 1)
-        xmin2 = max(0, x - R_excl)
-        xmax2 = min(width,  x + R_excl + 1)
+        if radius <= 6:
+            radius = 6  # enforce minimum radius of 6 pixels to ensure we mask the entire source (including wings)
+
+        # Store source with its measured radius
+        sources.append((x, y, max_value, radius))
+
+        # Mask the detected source using its measured radius to prevent re-detection
+        ymin2 = max(0, y - radius)
+        ymax2 = min(height, y + radius + 1)
+        xmin2 = max(0, x - radius)
+        xmax2 = min(width,  x + radius + 1)
 
         yy2, xx2 = np.ogrid[0:(ymax2 - ymin2), 0:(xmax2 - xmin2)]
         dist2 = np.sqrt((xx2 - (x - xmin2))**2 + (yy2 - (y - ymin2))**2)
 
-        mask[ymin2:ymax2, xmin2:xmax2][dist2 <= R_excl] = True
+        mask[ymin2:ymax2, xmin2:xmax2][dist2 <= radius] = True
 
         iteration += 1
         if iteration % 100 == 0:
             print(f"  Detected {iteration} sources...")
 
     print(f"\nDetected {len(sources)} sources above threshold")
-    if sources:
-        print(f"Brightest source at (x={sources[0][0]}, y={sources[0][1]}) with value {sources[0][2]:.1f}, radius={sources[0][3]}px")
 
     return sources, mu, sigma
 
@@ -196,9 +184,7 @@ def detect_sources():
 # - Subtracted background contribution from aperture flux
 # - Calculated flux for each detected source
 
-def aperture_photometry():
-    sources, mu, sigma = detect_sources()
-
+def aperture_photometry(sources, mu, sigma):
     height, width = data.shape
 
     # Build a global source mask to exclude sources from background annuli
@@ -215,8 +201,8 @@ def aperture_photometry():
     results = []
 
     for i, (x, y, peak, radius) in enumerate(sources):
-        annulus_inner = int(np.floor(radius * 1.2))
-        annulus_outer = int(np.ceil(radius * 3))
+        annulus_inner = int(np.ceil(radius))
+        annulus_outer = int(np.ceil(radius + 15))
 
         # Work on a local cutout around the source for efficiency
         ymin = max(0, y - annulus_outer)
@@ -247,7 +233,7 @@ def aperture_photometry():
 
         # Net flux = aperture counts - background contribution
         bg_total = bg_per_pixel * n_aperture
-        net_flux = aperture_sum - bg_total
+        net_flux = (aperture_sum - bg_total)/720
 
         results.append((x, y, peak, net_flux, bg_per_pixel, radius))
 
@@ -255,7 +241,6 @@ def aperture_photometry():
             print(f"  Photometry for {i + 1}/{len(sources)} sources...")
 
     print(f"\nCompleted aperture photometry for {len(results)} sources")
-    print(results[0])  # print first source's photometry results for verification
 
     return results
 
@@ -269,9 +254,7 @@ def aperture_photometry():
 # - Skip sources with non-positive net flux (cannot take log)
 # - Calculate magnitude error from MAGZRR
 
-def calibrate_fluxes():
-    results = aperture_photometry()
-
+def calibrate_fluxes(results):
     # Read zero point and its error from FITS header
     magzpt = header['MAGZPT']
     magzrr = header['MAGZRR']
@@ -281,8 +264,6 @@ def calibrate_fluxes():
     calibrated = []
 
     for (x, y, _, net_flux, _, _) in results:
-        if net_flux < 1:
-            continue  # skip sources with negligible flux (< 1 count)
 
         # m = ZP_inst + mag_i = ZP_inst - 2.5 * log10(counts)
         mag = magzpt - 2.5 * np.log10(net_flux)
@@ -290,7 +271,7 @@ def calibrate_fluxes():
 
         calibrated.append((x, y, net_flux, mag, mag_err))
 
-    print(f"Calibrated {len(calibrated)} sources (skipped {len(results) - len(calibrated)} with non-positive flux)")
+    print(f"Calibrated {len(calibrated)} sources")
 
     return calibrated
 
@@ -347,7 +328,7 @@ def number_counts(calibrated):
     N_cumulative = np.array([np.sum(mags <= m) for m in mag_bins])
 
     # Only keep bins with at least 1 source and magnitude <= 18
-    valid = (N_cumulative > 0) #& (mag_bins <= 18)
+    valid = (N_cumulative > 0) & (mag_bins <= 25)
     mag_plot = mag_bins[valid]
     N_raw = N_cumulative[valid]
 
@@ -377,31 +358,16 @@ def number_counts(calibrated):
     plt.title('Cumulative Number Counts')
 
     print(f"Magnitude range: {mags.min():.2f} to {mags.max():.2f}")
-    print(f"Total sources: {len(mags)}")
 
 def number_counts_histogram(calibrated):
     detected_mags = np.array([mag for (_, _, _, mag, _) in calibrated])
 
     plt.figure()
 
-    if USE_SIMULATION:
-        # Load simulated catalogue written by the simulation script
-        sim = np.loadtxt('sim_catalogue.csv', comments='#')
-        sim_mags = sim[:, 2]   # mag_true column
-
-        all_mags = np.concatenate([sim_mags, detected_mags])
-        mag_bins = np.arange(np.floor(all_mags.min()), np.ceil(all_mags.max()) + 0.5, 0.5)
-
-        plt.hist(sim_mags,   bins=mag_bins, alpha=0.55, color='steelblue',
-                 label=f'Simulated ({len(sim_mags)} sources)')
-        plt.hist(detected_mags, bins=mag_bins, alpha=0.70, color='tomato',
-                 label=f'Detected ({len(detected_mags)} sources)')
-        plt.title('Histogram: Simulated vs Detected Sources (Simulation)')
-    else:
-        mag_bins = np.arange(np.floor(detected_mags.min()), np.ceil(detected_mags.max()) + 0.5, 0.5)
-        plt.hist(detected_mags, bins=mag_bins, color='steelblue',
-                 label=f'Detected ({len(detected_mags)} sources)')
-        plt.title('Number Counts per Magnitude Bin')
+    mag_bins = np.arange(np.floor(detected_mags.min()), np.ceil(detected_mags.max()) + 0.5, 0.5)
+    plt.hist(detected_mags, bins=mag_bins, color='steelblue',
+             label=f'Detected ({len(detected_mags)} sources)')
+    plt.title('Number Counts per Magnitude Bin')
 
     plt.xlabel('Magnitude')
     plt.ylabel('Number of sources')
@@ -458,47 +424,19 @@ def visualise_sources(sources, calibrated):
     plt.tight_layout()
 
     print(f"\nVisualisation created: {len(sources)} sources detected")
-    print(f"Calibrated sources: {len(calibrated)}")
-
-# =============================================================================
-# Magnitude vs Source Size
-# =============================================================================
-
-def magnitude_vs_size(sources, calibrated):
-    # Build lookup from (x, y) -> radius from sources
-    radius_lookup = {(x, y): r for (x, y, _, r) in sources}
-
-    mags = []
-    radii = []
-    for (x, y, _, mag, _) in calibrated:
-        if (x, y) in radius_lookup:
-            mags.append(mag)
-            radii.append(radius_lookup[(x, y)])
-
-    mags = np.array(mags)
-    radii = np.array(radii)
-
-    plt.figure()
-    plt.scatter(radii, mags, s=5, alpha=0.5)
-    plt.xlabel('Source Radius (pixels)')
-    plt.ylabel('Magnitude')
-    plt.title('Magnitude vs Source Size')
-    plt.gca().invert_yaxis()  # brighter objects (lower mag) at the top
-
-    print(f"Plotted {len(mags)} sources: radius range {radii.min()}-{radii.max()} px")
 
 # =============================================================================
 # Running Code
 # =============================================================================
 
 #fit_gaussian()
-sources, mu, sigma = detect_sources()
-results = aperture_photometry()
-calibrated = calibrate_fluxes()
+mu, sigma = fit_gaussian()
+sources, mu, sigma = detect_sources(mu, sigma)
+results = aperture_photometry(sources, mu, sigma)
+calibrated = calibrate_fluxes(results)
 produce_catalogue(results, calibrated)
 number_counts(calibrated)
 number_counts_histogram(calibrated)
 visualise_sources(sources, calibrated)
-magnitude_vs_size(sources, calibrated)
 
 plt.show()

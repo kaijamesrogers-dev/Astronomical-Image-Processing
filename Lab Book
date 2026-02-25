@@ -71,3 +71,7 @@ Lab 9
 - Its not that sources that we detect that are under 6 pixels in radius dont count. Its that sources that we detect to have a radius < 6, we should still count them, but when calculating the flux, the radius should be measured from a minimum of 6 pixels, because its spread to 6 pixels, but its jsut hidden in the background. Basically the radius is probably greater that what we are detecting now.
 - Maybe we could compare one ring standard deviation to the next iteration ring standard deviation, and say when it doesnt change anymore its reached background.
 - [commit 9-2]
+
+- I changed the code, the minimam radius for detection is 1. The radius used for flux finding will be the radius detected + 6 pixels.
+- I changed it again. The minimum radius for detection is 1. All found radius' will be multiplied by factor k = 1.5 to include whole source. And if a radius is still smaller than 6 pixels after that, it gets changed to 6 pixels radius.
+- Could run Gaussian code on image with removed sources, to see if it fits perfectly.

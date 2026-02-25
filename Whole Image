@@ -15,22 +15,21 @@ TASKS = {"detect", "catalogue", "counts", "hist", "vis"}
 
 # Manual tiles in full-image coordinates: (y_start, y_end, x_start, x_end)
 TILES = [
-    (3800, 4450, 170, 1400),
-    (3800, 4450, 1450, 2350),
-    (3450, 3800, 170, 850),
-    (3150, 3450, 170, 700),
-    (2700, 3150, 170, 850),
-    (2700, 3800, 2000, 2350),
-    (550, 2700, 170, 1400),
-    (550, 2700, 1450, 2350),
+    (3800, 4461, 150, 1400),
+    (3800, 4461, 1450, 2420),
+    (3450, 3800, 150, 850),
+    (3150, 3450, 150, 700),
+    (2700, 3150, 150, 850),
+    (2700, 3800, 2000, 2420),
+    (550, 2700, 150, 1400),
+    (550, 2700, 1450, 2420)
 ]
 
 # =============================================================================
 # Background fit
 # =============================================================================
 
-
-def fit_gaussian(image_data, xmin=3300, xmax=3550, make_plot=True):
+def fit_gaussian(image_data, xmin=3300, xmax=3550, make_plot=False):
     masked_data = image_data[(image_data >= xmin) & (image_data <= xmax)]
 
     if masked_data.size == 0:
@@ -172,12 +171,15 @@ def print_tile_summary(tiles):
 def detect_sources_on_tiles(full_data, tiles):
     tile_stats = []
     all_global_sources = []
+    all_tile_pixels = [full_data[y0:y1, x0:x1].ravel() for (y0, y1, x0, x1) in tiles]
+    combined_tile_pixels = np.concatenate(all_tile_pixels)
+    mu, sigma = float(np.mean(combined_tile_pixels)), float(np.std(combined_tile_pixels))
+    print(f"\nCombined tiled-region background: mu={mu:.3f}, sigma={sigma:.3f}")
 
     for i, (y0, y1, x0, x1) in enumerate(tiles):
         print(f"\nProcessing tile {i}: y[{y0}:{y1}] x[{x0}:{x1}]")
         tile_data = full_data[y0:y1, x0:x1]
 
-        mu, sigma = fit_gaussian(tile_data, make_plot=True)
         sources_local = detect_sources(tile_data, mu, sigma)
 
         sources_global = []
@@ -348,10 +350,10 @@ def compute_areas_deg2(full_shape, tiles, pixel_scale, calibrated):
 
     return area_analysed_deg2, counts_per_deg2
 
-def number_counts(calibrated, full_shape, analysed_tiles, pixel_scale):
+def number_counts(calibrated, full_shape, analysed_tiles, pixel_scale, fit_m_max=24.5):
     """
-    Plots log10 N(<m) per deg^2 vs magnitude,
-    using only the analysed tile area.
+    Plot ALL log10 N(<m) per deg^2 points, but only FIT points with m <= fit_m_max.
+    Shades the excluded (m > fit_m_max) region in grey.
     """
 
     if len(calibrated) == 0:
@@ -360,72 +362,100 @@ def number_counts(calibrated, full_shape, analysed_tiles, pixel_scale):
 
     mags = np.array([mag for (_, _, _, mag, _) in calibrated], dtype=float)
 
-    # Compute analysed area only
+    # Analysed area (deg^2)
     area_analysed_deg2, counts_per_deg2 = compute_areas_deg2(
         full_shape, analysed_tiles, pixel_scale, calibrated
     )
 
     # Magnitude bins (0.5 mag spacing)
-    mag_bins = np.arange(np.floor(mags.min()),
-                         np.ceil(mags.max()) + 0.5,
+    mag_bins = np.arange(np.floor(mags.min()) - 0.5,
+                         np.ceil(mags.max()),
                          0.5)
 
-    # Cumulative counts in analysed region
-    N_cumulative = np.array([np.sum(mags <= m) for m in mag_bins],
-                            dtype=float)
+    # Cumulative counts (raw) in analysed region
+    N_cumulative = np.array([np.sum(mags <= m) for m in mag_bins], dtype=float)
 
     # Convert to per deg^2
     N_per_deg2 = N_cumulative / area_analysed_deg2
 
-    # Only keep bins with at least 1 source
-    valid = (N_per_deg2 > 0) & (mag_bins <= 25)
-    mag_plot = mag_bins[valid]
-    N_plot = N_per_deg2[valid]
+    # Keep bins with at least 1 source for plotting
+    plot_valid = (N_per_deg2 > 0)
+    mag_plot_all = mag_bins[plot_valid]
+    N_plot_all = N_per_deg2[plot_valid]
+    N_raw_all = N_cumulative[plot_valid]  # for Poisson errors
 
-    if mag_plot.size == 0:
+    if mag_plot_all.size == 0:
         print("No valid bins for number counts plot.")
         return None
 
-    log10_N = np.log10(N_plot)
-    log10_err = 1.0 / (np.sqrt(N_cumulative[valid]) * np.log(10))
+    log10_N_all = np.log10(N_plot_all)
+    log10_err_all = 1.0 / (np.sqrt(N_raw_all) * np.log(10))
 
+    # Subset used for fitting only
+    fit_mask = mag_plot_all <= fit_m_max
+    x = mag_plot_all[fit_mask]
+    y = log10_N_all[fit_mask]
+    sigma_y = log10_err_all[fit_mask]
+
+    if x.size < 2:
+        print("Not enough points for a fit (need at least 2 bins with m <= fit_m_max).")
+        return None
+
+    # Weighted least squares fit + uncertainties
+    w = 1.0 / (sigma_y**2)
+    xbar = np.sum(w * x) / np.sum(w)
+    Sxx = np.sum(w * (x - xbar)**2)
+
+    gradient = np.sum(w * (x - xbar) * y) / Sxx
+    intercept = (np.sum(w * y) - gradient * np.sum(w * x)) / np.sum(w)
+
+    gradient_err = np.sqrt(1.0 / Sxx)
+    intercept_err = np.sqrt(1.0 / np.sum(w) + xbar**2 / Sxx)
+
+    # Plot
     plt.figure()
-    plt.errorbar(mag_plot, log10_N, yerr=log10_err,
+
+    # Grey-out the region not used in the fit
+    x_max = mag_plot_all.max()
+    if x_max > fit_m_max:
+        plt.axvspan(fit_m_max, x_max, color="0.9", zorder=0,
+                    label="Excluded from fit")
+
+    # All points (including those excluded)
+    plt.errorbar(mag_plot_all, log10_N_all, yerr=log10_err_all,
                  fmt="ko", markersize=4,
                  label="Observed (per deg$^2$)")
 
-    # Weighted linear fit
-    w = 1.0 / np.maximum(log10_err, 1e-12)
-    gradient, intercept = np.polyfit(mag_plot, log10_N, 1, w=w)
+    # Fit line only over the fitted range
+    x_fit_line = np.linspace(x.min(), x.max(), 200)
+    plt.plot(x_fit_line, gradient * x_fit_line + intercept, "b--",
+             label=f"Fit: slope = {gradient:.4f}")
 
-    # Euclidean reference (slope 0.6)
-    mid = len(mag_plot) // 2
-    constant = log10_N[mid] - 0.6 * mag_plot[mid]
-    mag_theory = np.linspace(mag_plot[0], mag_plot[-1], 100)
-
-    plt.plot(mag_theory,
-             0.6 * mag_theory + constant,
-             "r--",
-             label="Theory: 0.6m + const")
-
-    plt.plot(mag_theory,
-             gradient * mag_theory + intercept,
-             "b--",
-             label=f"Fit: {gradient:.4f}m + const")
+    # Euclidean reference slope 0.6, normalised to match near mid of fitted range
+    mid = len(x) // 2
+    constant = y[mid] - 0.6 * x[mid]
+    plt.plot(x_fit_line, 0.6 * x_fit_line + constant, "r--",
+             label="Theory: slope = 0.6")
 
     plt.xlabel("Magnitude")
     plt.ylabel("log$_{10}$(N(< m)) per deg$^2$")
     plt.legend()
-    plt.title("Cumulative Galaxy Number Counts")
 
-    print(f"Measured gradient: {gradient:.4f} (theoretical: 0.6)")
-    print(f"Magnitude range: {mags.min():.2f} to {mags.max():.2f}")
+    print(f"Measured gradient (fit m <= {fit_m_max:g}): {gradient:.4f} ± {gradient_err:.4f} mag^-1")
+    print(f"Intercept: {intercept:.4f} ± {intercept_err:.4f}")
+    print(f"Area analysed: {area_analysed_deg2:.6f} deg^2")
+    print(f"Counts per deg^2 (all sources): {counts_per_deg2:.2f}")
+    print(f"Magnitude range (all sources): {mags.min():.2f} to {mags.max():.2f}")
 
     return {
-        "mag_plot": mag_plot,
-        "N_per_deg2": N_plot,
+        "mag_plot_all": mag_plot_all,
+        "log10_N_all": log10_N_all,
+        "log10_err_all": log10_err_all,
+        "fit_m_max": fit_m_max,
         "gradient": gradient,
+        "gradient_err": gradient_err,
         "intercept": intercept,
+        "intercept_err": intercept_err,
         "area_analysed_deg2": area_analysed_deg2,
         "counts_per_deg2": counts_per_deg2,
     }

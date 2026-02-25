@@ -20,7 +20,7 @@ crop_region = (slice(1050, 1700), slice(390, 1300))
 data = data[crop_region]
 
 # print header and data
-print(header)
+#print(header)
 #print(data)
 
 # =============================================================================
@@ -35,7 +35,7 @@ print(header)
 # - Extracted background level (mu) and noise (sigma)
 # - Plotted histogram with fitted Gaussian curve
 
-def fit_gaussian():
+def fit_gaussian(data):
     xmin, xmax = 3300, 3550
     masked_data = data[(data >= xmin) & (data <= xmax)]
 
@@ -62,6 +62,7 @@ def fit_gaussian():
 
     plt.xlabel("Pixel values")
     plt.ylabel("Number of pixels")
+    plt.show()
 
     return mu, sigma
 
@@ -80,82 +81,67 @@ def fit_gaussian():
 
 def detect_sources(mu, sigma):
     # Thresholds
-    seed_threshold = mu + 3 * sigma       # initial pixel must exceed this
-    ring_threshold = mu + 2.0 * sigma       # expanding disc average must exceed this
-    min_radius = 1                         # reject single hot pixels
+    seed_threshold = mu + 3 * sigma          # initial pixel must exceed this
+    ring_threshold = mu + 2.0 * sigma        # ring median must exceed this
+    min_radius = 1                           # reject tiny detections
 
     # Create mask image to track processed pixels
     mask = np.zeros(data.shape, dtype=bool)
 
-    # List to store detected sources (x, y, peak_value, radius)
     sources = []
 
     print(f"Seed threshold (4σ) = {seed_threshold:.1f}")
     print(f"Ring threshold (3σ) = {ring_threshold:.1f}")
 
-    # Iteratively find sources
     iteration = 0
     while True:
-        # Create a copy of data with masked regions set to very low value
         masked_data = np.copy(data).astype(float)
         masked_data[mask] = -np.inf
 
-        # Find highest pixel value
         max_value = np.max(masked_data)
-
-        # Check if above seed threshold
         if max_value < seed_threshold:
             break
 
-        # Find position of maximum
         max_index = np.argmax(masked_data)
         y, x = np.unravel_index(max_index, masked_data.shape)
 
-        # Expand outward from the peak pixel in rings
-        # At each radius r, compute the mean of pixels in the ring (r-1 < dist <= r)
-        # Stop when the ring average falls below the threshold
         found_radius = 0
         height, width = data.shape
         for r in range(1, 100 + 1):
-            # Define local cutout bounds around the source
             ymin = max(0, y - r)
             ymax = min(height, y + r + 1)
             xmin = max(0, x - r)
-            xmax = min(width, x + r + 1)
+            xmax = min(width,  x + r + 1)
 
             cutout = masked_data[ymin:ymax, xmin:xmax]
-            yy, xx = np.ogrid[ymin:ymax, xmin:xmax] # list of xy values within rectangle around peak point
+            yy, xx = np.ogrid[ymin:ymax, xmin:xmax]
             dist = np.sqrt((xx - x)**2 + (yy - y)**2)
 
             in_ring = (dist > r - 1) & (dist <= r)
             if np.count_nonzero(in_ring) == 0:
                 break
+
             ring_median = np.median(cutout[in_ring])
 
             if ring_median < ring_threshold:
-                # Ring average dropped below threshold — stop expanding
                 found_radius = r - 1
                 break
         else:
-            # Reached image boundary without dropping below threshold
             found_radius = r
 
         if found_radius <= min_radius:
-            # Reject: too small (likely a hot pixel)
             mask[y, x] = True
             continue
 
-        # Extend the radius by a factor to ensure we mask the entire source (including wings)
+        # Extend the radius to mask wings
         k = 1.5
         radius = int(k * found_radius)
-
         if radius <= 6:
-            radius = 6  # enforce minimum radius of 6 pixels to ensure we mask the entire source (including wings)
+            radius = 6
 
-        # Store source with its measured radius
         sources.append((x, y, max_value, radius))
 
-        # Mask the detected source using its measured radius to prevent re-detection
+        # Apply circular mask for this source
         ymin2 = max(0, y - radius)
         ymax2 = min(height, y + radius + 1)
         xmin2 = max(0, x - radius)
@@ -163,7 +149,6 @@ def detect_sources(mu, sigma):
 
         yy2, xx2 = np.ogrid[0:(ymax2 - ymin2), 0:(xmax2 - xmin2)]
         dist2 = np.sqrt((xx2 - (x - xmin2))**2 + (yy2 - (y - ymin2))**2)
-
         mask[ymin2:ymax2, xmin2:xmax2][dist2 <= radius] = True
 
         iteration += 1
@@ -172,6 +157,19 @@ def detect_sources(mu, sigma):
 
     print(f"\nDetected {len(sources)} sources above threshold")
 
+    # -------------------------------------------------------------------------
+    # NEW: Refit Gaussian on "background-only" pixels (sources removed by mask)
+    # -------------------------------------------------------------------------
+    background_only = data[~mask]  # 1D array of unmasked pixels
+
+    mu_bg, sigma_bg = fit_gaussian(background_only)
+
+    frac_masked = np.mean(mask)
+    print(f"Masked fraction of image = {100*frac_masked:.2f}%")
+    print(f"Initial:  mu={mu:.2f}, sigma={sigma:.2f}")
+    print(f"Refit BG: mu={mu_bg:.2f}, sigma={sigma_bg:.2f}")
+
+    # Return both sets so you can report the stability as a threshold check
     return sources, mu, sigma
 
 # =============================================================================
@@ -430,7 +428,7 @@ def visualise_sources(sources, calibrated):
 # =============================================================================
 
 #fit_gaussian()
-mu, sigma = fit_gaussian()
+mu, sigma = fit_gaussian(data)
 sources, mu, sigma = detect_sources(mu, sigma)
 results = aperture_photometry(sources, mu, sigma)
 calibrated = calibrate_fluxes(results)

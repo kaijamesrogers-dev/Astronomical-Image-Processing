@@ -14,7 +14,7 @@ data = hdulist[0].data
 header = hdulist[0].header
 
 # Define crop region (y_start:y_end, x_start:x_end)
-crop_region = (slice(1050, 1700), slice(390, 1300))
+crop_region = (slice(550, 2700), slice(1455, 2420))
 
 # crop data
 data = data[crop_region]
@@ -55,13 +55,16 @@ def fit_gaussian(data):
     popt, pcov = curve_fit(gaussian, bin_centres, counts, p0=[A0, mu0, sigma0])
     A, mu, sigma = popt
 
-    plt.hist(masked_data, bins=bin_edges)
-    plt.plot(bin_centres, gaussian(bin_centres, A, mu, sigma))
-
+    plt.hist(masked_data, bins=bin_edges, color = "cyan")
+    plt.plot(bin_centres, gaussian(bin_centres, A, mu, sigma), color = "red")
+    plt.xlabel("Pixel values", fontsize=14)
+    plt.ylabel("Number of pixels", fontsize=14)
     print(f"Background level (mu) = {mu:.1f}, Noise (sigma) = {sigma:.1f}")
+    plt.rcParams['font.family'] = 'Times New Roman'
 
-    plt.xlabel("Pixel values")
-    plt.ylabel("Number of pixels")
+    plt.xticks(fontsize=14)
+    plt.yticks(fontsize=14)
+    plt.tight_layout()
     plt.show()
 
     return mu, sigma
@@ -429,12 +432,12 @@ def visualise_sources(sources, calibrated):
 
 #fit_gaussian()
 mu, sigma = fit_gaussian(data)
-sources, mu, sigma = detect_sources(mu, sigma)
-results = aperture_photometry(sources, mu, sigma)
-calibrated = calibrate_fluxes(results)
-produce_catalogue(results, calibrated)
-number_counts(calibrated)
-number_counts_histogram(calibrated)
-visualise_sources(sources, calibrated)
+#sources, mu, sigma = detect_sources(mu, sigma)
+#results = aperture_photometry(sources, mu, sigma)
+#calibrated = calibrate_fluxes(results)
+#produce_catalogue(results, calibrated)
+#number_counts(calibrated)
+#number_counts_histogram(calibrated)
+#visualise_sources(sources, calibrated)
 
 plt.show()

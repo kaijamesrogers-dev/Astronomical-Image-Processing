@@ -15,19 +15,20 @@ TASKS = {"detect", "catalogue", "counts", "hist", "vis"}
 
 # Manual tiles in full-image coordinates: (y_start, y_end, x_start, x_end)
 TILES = [
-    (3800, 4461, 150, 1400),
-    (3800, 4461, 1450, 2420),
-    (3450, 3800, 150, 850),
-    (3150, 3450, 150, 700),
-    (2700, 3150, 150, 850),
+    (3800, 4461, 150, 1420),
+    (3800, 4461, 1455, 2420),
+    (3425, 3800, 150, 850),
+    (3200, 3425, 150, 680),
+    (2700, 3200, 150, 850),
     (2700, 3800, 2000, 2420),
-    (550, 2700, 150, 1400),
-    (550, 2700, 1450, 2420)
+    (550, 2700, 150, 1420),
+    (550, 2700, 1455, 2420),
 ]
 
 # =============================================================================
 # Background fit
 # =============================================================================
+
 
 def fit_gaussian(image_data, xmin=3300, xmax=3550, make_plot=False):
     masked_data = image_data[(image_data >= xmin) & (image_data <= xmax)]
@@ -70,7 +71,7 @@ def fit_gaussian(image_data, xmin=3300, xmax=3550, make_plot=False):
 
 def detect_sources(image_data, mu, sigma):
     seed_threshold = mu + 3.0 * sigma
-    ring_threshold = mu + 2.0 * sigma
+    ring_threshold = mu + 1.255 * sigma
     min_radius = 1
 
     height, width = image_data.shape
@@ -171,15 +172,12 @@ def print_tile_summary(tiles):
 def detect_sources_on_tiles(full_data, tiles):
     tile_stats = []
     all_global_sources = []
-    all_tile_pixels = [full_data[y0:y1, x0:x1].ravel() for (y0, y1, x0, x1) in tiles]
-    combined_tile_pixels = np.concatenate(all_tile_pixels)
-    mu, sigma = float(np.mean(combined_tile_pixels)), float(np.std(combined_tile_pixels))
-    print(f"\nCombined tiled-region background: mu={mu:.3f}, sigma={sigma:.3f}")
 
     for i, (y0, y1, x0, x1) in enumerate(tiles):
         print(f"\nProcessing tile {i}: y[{y0}:{y1}] x[{x0}:{x1}]")
         tile_data = full_data[y0:y1, x0:x1]
 
+        mu, sigma = fit_gaussian(tile_data, make_plot=False)
         sources_local = detect_sources(tile_data, mu, sigma)
 
         sources_global = []
@@ -428,17 +426,19 @@ def number_counts(calibrated, full_shape, analysed_tiles, pixel_scale, fit_m_max
 
     # Fit line only over the fitted range
     x_fit_line = np.linspace(x.min(), x.max(), 200)
-    plt.plot(x_fit_line, gradient * x_fit_line + intercept, "b--",
+    plt.plot(x_fit_line, gradient * x_fit_line + intercept, color = "cyan",
              label=f"Fit: slope = {gradient:.4f}")
 
     # Euclidean reference slope 0.6, normalised to match near mid of fitted range
     mid = len(x) // 2
     constant = y[mid] - 0.6 * x[mid]
-    plt.plot(x_fit_line, 0.6 * x_fit_line + constant, "r--",
+    plt.plot(x_fit_line, 0.6 * x_fit_line + constant, color = "red",
              label="Theory: slope = 0.6")
-
-    plt.xlabel("Magnitude")
-    plt.ylabel("log$_{10}$(N(< m)) per deg$^2$")
+    plt.rcParams['font.family'] = 'Times New Roman'
+    plt.xlabel("Magnitude", fontsize=14)
+    plt.ylabel("log$_{10}$(N(< m)) per deg$^2$", fontsize=14)
+    plt.xticks(fontsize=14)
+    plt.yticks(fontsize=14)
     plt.legend()
 
     print(f"Measured gradient (fit m <= {fit_m_max:g}): {gradient:.4f} ± {gradient_err:.4f} mag^-1")

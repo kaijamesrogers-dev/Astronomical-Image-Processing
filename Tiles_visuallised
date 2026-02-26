@@ -1,0 +1,78 @@
+from astropy.io import fits
+import numpy as np
+import matplotlib.pyplot as plt
+from astropy.visualization import ImageNormalize, HistEqStretch
+
+# -------------------------
+# User config
+# -------------------------
+FITS_PATH = "mosaic.fits"
+
+TILES = [
+    (3800, 4461, 150, 1420),
+    (3800, 4461, 1455, 2420),
+    (3425, 3800, 150, 850),
+    (3200, 3425, 150, 680),
+    (2700, 3200, 150, 850),
+    (2700, 3800, 2000, 2420),
+    (550, 2700, 150, 1420),
+    (550, 2700, 1455, 2420),
+]
+
+# -------------------------
+# Load image
+# -------------------------
+with fits.open(FITS_PATH) as hdul:
+    img = np.asarray(hdul[0].data)
+
+height, width = img.shape
+
+# Use EXACT same normalisation style as visualise_sources()
+norm = ImageNormalize(img, stretch=HistEqStretch(img))
+
+# -------------------------
+# Build used-mask
+# -------------------------
+used = np.zeros((height, width), dtype=bool)
+
+for (y0, y1, x0, x1) in TILES:
+    y0 = max(0, y0)
+    y1 = min(height, y1)
+    x0 = max(0, x0)
+    x1 = min(width, x1)
+
+    if y1 > y0 and x1 > x0:
+        used[y0:y1, x0:x1] = True
+
+unused = ~used
+
+# Create red overlay mask
+overlay = np.zeros((height, width), dtype=float)
+overlay[unused] = 1.0
+overlay[used] = np.nan  # Only paint unused pixels
+
+# -------------------------
+# Plot
+# -------------------------
+plt.figure(figsize=(10, 7))
+
+# Background image
+plt.imshow(img, cmap="gray", origin="lower", norm=norm)
+
+# Draw tile rectangles
+ax = plt.gca()
+for (y0, y1, x0, x1) in TILES:
+    rect = plt.Rectangle((x0, y0), x1 - x0, y1 - y0,
+                         fill=False, edgecolor="cyan", linewidth=0.5)
+    ax.add_patch(rect)
+
+# Green tint for used tiles
+overlay = np.zeros((height, width), dtype=float)
+overlay[used] = 1.0
+overlay[~used] = np.nan
+
+plt.imshow(overlay, cmap="Blues", origin="lower", alpha=0.3)
+
+plt.axis("off")
+plt.tight_layout()
+plt.show()

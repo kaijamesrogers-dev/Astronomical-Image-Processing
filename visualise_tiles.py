@@ -9,7 +9,7 @@ from astropy.visualization import ImageNormalize, HistEqStretch
 FITS_PATH = "mosaic.fits"
 
 TILES = [
-    (3800, 4461, 150, 1420),
+        (3800, 4461, 150, 1420),
     (3800, 4461, 1455, 2420),
     (3425, 3800, 150, 850),
     (3200, 3425, 150, 680),

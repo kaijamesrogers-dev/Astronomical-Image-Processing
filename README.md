@@ -4,6 +4,12 @@
 
 ## Overview
 
+<p align="center">
+  <img src="Figures/astro_image.png" alt="The raw deep-sky image analysed in this project" width="500"/>
+</p>
+
+*The raw image this project analyses — a deep optical exposure of the sky. The bright object in the upper centre is a foreground star; note the vertical streak it "bleeds" across the frame, and the jagged, uneven edges where several exposures were combined.*
+
 This project takes a real photograph of deep space (taken with the 4-metre telescope at Kitt Peak Observatory, USA) and answers a simple-sounding question: **how many galaxies are in this picture, and how bright is each one?**
 
 That's harder than it sounds. The image contains thousands of faint smudges of light sitting on top of background noise, plus very bright stars that "bleed" streaks across the camera sensor and jagged edges where multiple exposures didn't quite overlap. So I wrote a program that works through the problem in four steps.
@@ -89,6 +95,12 @@ The full write-up (method, results, error analysis) is in [`report.pdf`](report.
 
 ## 概要
 
+<p align="center">
+  <img src="Figures/astro_image.png" alt="このプロジェクトで解析した元画像" width="500"/>
+</p>
+
+*このプロジェクトで解析した元画像 — 深宇宙を撮影した光学画像です。中央上部の明るい天体は手前にある恒星で、画像全体に縦方向の「にじみ」を引いているのが分かります。また、複数の露光を合成した際の縁のギザギザも見て取れます。*
+
 このプロジェクトは、実際の深宇宙の画像(アメリカ・キットピーク天文台の4m望遠鏡で撮影)を使って、シンプルに聞こえる問いに答えるものです。**この画像には銀河がいくつ写っていて、それぞれどのくらいの明るさなのか？**
 
 これは見た目より難しい問題です。画像には、背景ノイズの上に何千もの淡い光の点が写っており、明るい星がセンサー上に筋状の「にじみ」を作り、複数の露光の継ぎ目にはギザギザした縁も残っています。そこで、4つのステップで処理を行うプログラムを書きました。
@@ -96,12 +108,12 @@ The full write-up (method, results, error analysis) is in [`report.pdf`](report.
 ### ステップ1 — 画像のどの部分を信頼するかを選ぶ
 
 <p align="center">
-  <img src="Figures/tiles_visualise.png" alt="解析対象領域をシアンで示した画像" width="650"/>
+  <img src="Figures/tiles_visualise.png" alt="解析対象領域を水色で示した画像" width="650"/>
 </p>
 
-*実際に解析した8つの領域(シアンの枠)。明るい星とそのにじみ、ノイズの多い画像の端を避けています。*
+*実際に解析した8つの領域(水色の枠)。明るい星とそのにじみ、ノイズの多い画像の端を避けています。*
 
-元の画像には損傷した領域があります。上部中央の非常に明るい星が画像全体に縦線状のにじみを作っており、端の部分は露光回数が少ないためノイズが多くなっています。これらが結果を汚染しないよう、明るい星・にじみ・ノイズの多い端を避けた8つの長方形領域(上の画像のシアンの枠)を手動で選びました。以降の解析はすべてこの枠内のみで行われます。
+元の画像には損傷した領域があります。上部中央の非常に明るい星が画像全体に縦線状のにじみを作っており、端の部分は露光回数が少ないためノイズが多くなっています。これらが結果を汚染しないよう、明るい星・にじみ・ノイズの多い端を避けた8つの長方形領域(上の画像の水色の枠)を手動で選びました。以降の解析はすべてこの枠内のみで行われます。
 
 ### ステップ2 — 背景を測定する
 

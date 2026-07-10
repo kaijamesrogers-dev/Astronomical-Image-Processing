@@ -1,6 +1,6 @@
 # Counting Galaxies in a Deep Sky Image
 
-*日本語版/Japanese Version(#日本語版)*
+*[日本語はこちら / Japanese version below](#日本語版)*
 
 <p align="center">
   <img src="figures/tiles_visualise.png" alt="The sky image with the analysed regions outlined in cyan" width="650"/>

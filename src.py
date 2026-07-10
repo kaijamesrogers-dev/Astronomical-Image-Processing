@@ -5,100 +5,85 @@ import numpy as np
 from astropy.visualization import HistEqStretch, ImageNormalize
 
 # =============================================================================
-# Section 5.2: Reading the Data
+# User-editable configuration
 # =============================================================================
 
-# import data
-hdulist = fits.open("mosaic.fits")
-data = hdulist[0].data
-header = hdulist[0].header
+FITS_PATH = "mosaic.fits"
+PIXEL_SCALE = 0.258  # arcsec/pixel
+MERGE_DIST = 8.0
+TASKS = {"detect", "catalogue", "counts", "hist", "vis"}
 
-# Define crop region (y_start:y_end, x_start:x_end)
-crop_region = (slice(550, 2700), slice(1455, 2420))
-
-# crop data
-data = data[crop_region]
-
-# print header and data
-#print(header)
-#print(data)
+# Manual tiles in full-image coordinates: (y_start, y_end, x_start, x_end)
+TILES = [
+    (3800, 4461, 150, 1420),
+    (3800, 4461, 1455, 2420),
+    (3425, 3800, 150, 850),
+    (3200, 3425, 150, 680),
+    (2700, 3200, 150, 850),
+    (2700, 3800, 2000, 2420),
+    (550, 2700, 150, 1420),
+    (550, 2700, 1455, 2420),
+]
 
 # =============================================================================
-# Section 5.2.6: The Statistics of the Image
+# Background fit
 # =============================================================================
 
-# COMPLETED:
-# - Masked data to isolate background pixels (3300-3550 range)
-# - Created histogram of pixel values
-# - Fitted Gaussian function to histogram
-# - Excluded outlier bin from fit for better accuracy
-# - Extracted background level (mu) and noise (sigma)
-# - Plotted histogram with fitted Gaussian curve
 
-def fit_gaussian(data):
-    xmin, xmax = 3300, 3550
-    masked_data = data[(data >= xmin) & (data <= xmax)]
+def fit_gaussian(image_data, xmin=3300, xmax=3550, make_plot=False):
+    masked_data = image_data[(image_data >= xmin) & (image_data <= xmax)]
 
-    # Integer bin centres
+    if masked_data.size == 0:
+        raise ValueError(
+            f"No pixels in range [{xmin}, {xmax}] for Gaussian fit on this tile."
+        )
+
     bin_centres = np.arange(xmin, xmax + 1)
     bin_edges = np.arange(xmin - 0.5, xmax + 1.5, 1)
-
-    counts, bins = np.histogram(masked_data, bins=bin_edges)
+    counts, _ = np.histogram(masked_data, bins=bin_edges)
 
     def gaussian(x, A, mu, sigma):
-        return A * np.exp(-(x - mu)**2 / (2 * sigma**2))
+        return A * np.exp(-(x - mu) ** 2 / (2 * sigma**2))
 
     A0 = counts.max()
     mu0 = bin_centres[np.argmax(counts)]
-    sigma0 = np.std(masked_data)
+    sigma0 = max(np.std(masked_data), 1e-6)
 
-    popt, pcov = curve_fit(gaussian, bin_centres, counts, p0=[A0, mu0, sigma0])
+    popt, _ = curve_fit(gaussian, bin_centres, counts, p0=[A0, mu0, sigma0])
     A, mu, sigma = popt
 
-    plt.hist(masked_data, bins=bin_edges, color = "cyan")
-    plt.plot(bin_centres, gaussian(bin_centres, A, mu, sigma), color = "red")
-    plt.xlabel("Pixel values", fontsize=14)
-    plt.ylabel("Number of pixels", fontsize=14)
-    print(f"Background level (mu) = {mu:.1f}, Noise (sigma) = {sigma:.1f}")
-    plt.rcParams['font.family'] = 'Times New Roman'
+    if make_plot:
+        plt.figure()
+        plt.hist(masked_data, bins=bin_edges, alpha=0.7, label="Pixels")
+        plt.plot(bin_centres, gaussian(bin_centres, A, mu, sigma), "r-", label="Gaussian fit")
+        plt.xlabel("Pixel values")
+        plt.ylabel("Number of pixels")
+        plt.legend()
+        plt.title("Background Histogram + Gaussian Fit")
 
-    plt.xticks(fontsize=14)
-    plt.yticks(fontsize=14)
-    plt.tight_layout()
-    plt.show()
-
-    return mu, sigma
+    return float(mu), float(abs(sigma))
 
 
 # =============================================================================
-# Section 5.3: Source Detection
+# Source detection
 # =============================================================================
 
-# COMPLETED:
-# - Seed pixel must be above 4 sigma to be a candidate
-# - Expanding rings: grow radius from 1 outward, compute mean of each ring
-# - Stop when ring mean falls below 3 sigma — record radius
-# - Reject sources with radius < 2 (hot pixels), no cap on radius
-# - Mask each detected source using its measured radius
-# - Stored results in sources list: (x, y, peak_value, radius)
 
-def detect_sources(mu, sigma):
-    # Thresholds
-    seed_threshold = mu + 3 * sigma          # initial pixel must exceed this
-    ring_threshold = mu + 2.0 * sigma        # ring median must exceed this
-    min_radius = 1                           # reject tiny detections
+def detect_sources(image_data, mu, sigma):
+    seed_threshold = mu + 3.0 * sigma
+    ring_threshold = mu + 1.255 * sigma
+    min_radius = 1
 
-    # Create mask image to track processed pixels
-    mask = np.zeros(data.shape, dtype=bool)
-
+    height, width = image_data.shape
+    mask = np.zeros(image_data.shape, dtype=bool)
     sources = []
 
-    print(f"Seed threshold (4σ) = {seed_threshold:.1f}")
-    print(f"Ring threshold (3σ) = {ring_threshold:.1f}")
+    print(f"Seed threshold = {seed_threshold:.2f}")
+    print(f"Ring threshold = {ring_threshold:.2f}")
 
     iteration = 0
     while True:
-        masked_data = np.copy(data).astype(float)
+        masked_data = np.copy(image_data).astype(float)
         masked_data[mask] = -np.inf
 
         max_value = np.max(masked_data)
@@ -109,23 +94,21 @@ def detect_sources(mu, sigma):
         y, x = np.unravel_index(max_index, masked_data.shape)
 
         found_radius = 0
-        height, width = data.shape
-        for r in range(1, 100 + 1):
+        for r in range(1, 101):
             ymin = max(0, y - r)
             ymax = min(height, y + r + 1)
             xmin = max(0, x - r)
-            xmax = min(width,  x + r + 1)
+            xmax = min(width, x + r + 1)
 
             cutout = masked_data[ymin:ymax, xmin:xmax]
             yy, xx = np.ogrid[ymin:ymax, xmin:xmax]
-            dist = np.sqrt((xx - x)**2 + (yy - y)**2)
+            dist = np.sqrt((xx - x) ** 2 + (yy - y) ** 2)
 
             in_ring = (dist > r - 1) & (dist <= r)
             if np.count_nonzero(in_ring) == 0:
                 break
 
             ring_median = np.median(cutout[in_ring])
-
             if ring_median < ring_threshold:
                 found_radius = r - 1
                 break
@@ -136,267 +119,385 @@ def detect_sources(mu, sigma):
             mask[y, x] = True
             continue
 
-        # Extend the radius to mask wings
-        k = 1.5
-        radius = int(k * found_radius)
+        radius = int(1.5 * found_radius)
         if radius <= 6:
             radius = 6
 
-        sources.append((x, y, max_value, radius))
+        sources.append((int(x), int(y), float(max_value), int(radius)))
 
-        # Apply circular mask for this source
         ymin2 = max(0, y - radius)
         ymax2 = min(height, y + radius + 1)
         xmin2 = max(0, x - radius)
-        xmax2 = min(width,  x + radius + 1)
+        xmax2 = min(width, x + radius + 1)
 
-        yy2, xx2 = np.ogrid[0:(ymax2 - ymin2), 0:(xmax2 - xmin2)]
-        dist2 = np.sqrt((xx2 - (x - xmin2))**2 + (yy2 - (y - ymin2))**2)
+        yy2, xx2 = np.ogrid[0 : (ymax2 - ymin2), 0 : (xmax2 - xmin2)]
+        dist2 = np.sqrt((xx2 - (x - xmin2)) ** 2 + (yy2 - (y - ymin2)) ** 2)
         mask[ymin2:ymax2, xmin2:xmax2][dist2 <= radius] = True
 
         iteration += 1
         if iteration % 100 == 0:
             print(f"  Detected {iteration} sources...")
 
-    print(f"\nDetected {len(sources)} sources above threshold")
+    print(f"Detected {len(sources)} sources in tile")
+    return sources
 
-    # -------------------------------------------------------------------------
-    # NEW: Refit Gaussian on "background-only" pixels (sources removed by mask)
-    # -------------------------------------------------------------------------
-    background_only = data[~mask]  # 1D array of unmasked pixels
-
-    mu_bg, sigma_bg = fit_gaussian(background_only)
-
-    frac_masked = np.mean(mask)
-    print(f"Masked fraction of image = {100*frac_masked:.2f}%")
-    print(f"Initial:  mu={mu:.2f}, sigma={sigma:.2f}")
-    print(f"Refit BG: mu={mu_bg:.2f}, sigma={sigma_bg:.2f}")
-
-    # Return both sets so you can report the stability as a threshold check
-    return sources, mu, sigma
 
 # =============================================================================
-# Section 5.4: Source Photometry
+# Tile helpers and merging
 # =============================================================================
 
-# COMPLETED:
-# - Used each source's measured radius as the aperture
-# - Background annulus scales with source radius (gap=2px, width=7px)
-# - Subtracted background contribution from aperture flux
-# - Calculated flux for each detected source
 
-def aperture_photometry(sources, mu, sigma):
-    height, width = data.shape
+def validate_tiles(tiles, shape):
+    h, w = shape
+    valid_tiles = []
+    for i, (y0, y1, x0, x1) in enumerate(tiles):
+        y0c = max(0, int(y0))
+        y1c = min(h, int(y1))
+        x0c = max(0, int(x0))
+        x1c = min(w, int(x1))
+        if y1c <= y0c or x1c <= x0c:
+            print(f"Skipping invalid tile {i}: {(y0, y1, x0, x1)}")
+            continue
+        valid_tiles.append((y0c, y1c, x0c, x1c))
+    return valid_tiles
 
-    # Build a global source mask to exclude sources from background annuli
-    source_mask = np.zeros(data.shape, dtype=bool)
+
+def print_tile_summary(tiles):
+    print("\nManual tile summary:")
+    for i, (y0, y1, x0, x1) in enumerate(tiles):
+        area = (y1 - y0) * (x1 - x0)
+        print(f"  Tile {i:02d}: y[{y0}:{y1}] x[{x0}:{x1}] -> {area} px")
+
+
+def detect_sources_on_tiles(full_data, tiles):
+    tile_stats = []
+    all_global_sources = []
+
+    for i, (y0, y1, x0, x1) in enumerate(tiles):
+        print(f"\nProcessing tile {i}: y[{y0}:{y1}] x[{x0}:{x1}]")
+        tile_data = full_data[y0:y1, x0:x1]
+
+        mu, sigma = fit_gaussian(tile_data, make_plot=False)
+        sources_local = detect_sources(tile_data, mu, sigma)
+
+        sources_global = []
+        for (x, y, peak, radius) in sources_local:
+            gx = x + x0
+            gy = y + y0
+            sources_global.append((gx, gy, peak, radius))
+
+        tile_stats.append(
+            {
+                "tile_index": i,
+                "tile": (y0, y1, x0, x1),
+                "mu": mu,
+                "sigma": sigma,
+                "n_sources": len(sources_global),
+            }
+        )
+        all_global_sources.extend(sources_global)
+
+    print("\nPer-tile background parameters:")
+    for s in tile_stats:
+        print(
+            f"  Tile {s['tile_index']:02d}: mu={s['mu']:.3f}, "
+            f"sigma={s['sigma']:.3f}, n={s['n_sources']}"
+        )
+
+    return tile_stats, all_global_sources
+
+
+def merge_sources(sources, merge_dist=8.0):
+    if len(sources) == 0:
+        return []
+
+    sources_sorted = sorted(sources, key=lambda s: s[2], reverse=True)
+    kept = []
+    merge_dist2 = merge_dist**2
+
+    for src in sources_sorted:
+        x, y, peak, radius = src
+        duplicate = False
+        for (kx, ky, kpeak, kradius) in kept:
+            dx = x - kx
+            dy = y - ky
+            if dx * dx + dy * dy <= merge_dist2:
+                duplicate = True
+                break
+        if not duplicate:
+            kept.append((int(x), int(y), float(peak), int(radius)))
+
+    print(f"Merged sources: {len(sources)} -> {len(kept)} (merge_dist={merge_dist}px)")
+    return kept
+
+
+# =============================================================================
+# Photometry and calibration
+# =============================================================================
+
+
+def aperture_photometry(full_data, sources, fallback_mu):
+    height, width = full_data.shape
+    source_mask = np.zeros(full_data.shape, dtype=bool)
+
     for (sx, sy, _, sr) in sources:
         ymin = max(0, sy - sr)
         ymax = min(height, sy + sr + 1)
         xmin = max(0, sx - sr)
         xmax = min(width, sx + sr + 1)
         yy, xx = np.ogrid[ymin:ymax, xmin:xmax]
-        dist = np.sqrt((xx - sx)**2 + (yy - sy)**2)
+        dist = np.sqrt((xx - sx) ** 2 + (yy - sy) ** 2)
         source_mask[ymin:ymax, xmin:xmax][dist <= sr] = True
 
     results = []
-
     for i, (x, y, peak, radius) in enumerate(sources):
         annulus_inner = int(np.ceil(radius))
         annulus_outer = int(np.ceil(radius + 15))
 
-        # Work on a local cutout around the source for efficiency
         ymin = max(0, y - annulus_outer)
         ymax = min(height, y + annulus_outer + 1)
         xmin = max(0, x - annulus_outer)
         xmax = min(width, x + annulus_outer + 1)
 
-        cutout = data[ymin:ymax, xmin:xmax]
+        cutout = full_data[ymin:ymax, xmin:xmax]
         local_source_mask = source_mask[ymin:ymax, xmin:xmax]
 
-        # Distance from source centre for each pixel in the cutout
         yy, xx = np.ogrid[ymin:ymax, xmin:xmax]
-        dist = np.sqrt((xx - x)**2 + (yy - y)**2)
+        dist = np.sqrt((xx - x) ** 2 + (yy - y) ** 2)
 
-        # Source aperture: sum all pixels within this source's measured radius
         in_aperture = dist <= radius
         aperture_sum = np.sum(cutout[in_aperture])
         n_aperture = np.count_nonzero(in_aperture)
 
-        # Background annulus: exclude pixels belonging to any detected source
         in_annulus = (dist >= annulus_inner) & (dist <= annulus_outer)
         clean_annulus = in_annulus & ~local_source_mask
 
         if np.count_nonzero(clean_annulus) > 0:
             bg_per_pixel = np.mean(cutout[clean_annulus])
         else:
-            bg_per_pixel = mu  # fallback to global background
+            bg_per_pixel = fallback_mu
 
-        # Net flux = aperture counts - background contribution
-        bg_total = bg_per_pixel * n_aperture
-        net_flux = (aperture_sum - bg_total)/720
-
-        results.append((x, y, peak, net_flux, bg_per_pixel, radius))
+        net_flux = (aperture_sum - bg_per_pixel * n_aperture) / 720.0
+        results.append((int(x), int(y), float(peak), float(net_flux), float(bg_per_pixel), int(radius)))
 
         if (i + 1) % 100 == 0:
             print(f"  Photometry for {i + 1}/{len(sources)} sources...")
 
-    print(f"\nCompleted aperture photometry for {len(results)} sources")
-
+    print(f"Completed aperture photometry for {len(results)} sources")
     return results
 
-# =============================================================================
-# Section 5.5: Calibrating the Fluxes
-# =============================================================================
 
-# COMPLETED:
-# - Read MAGZPT and MAGZRR from FITS header
-# - Convert net flux (counts) to calibrated magnitudes: m = MAGZPT - 2.5 * log10(counts)
-# - Skip sources with non-positive net flux (cannot take log)
-# - Calculate magnitude error from MAGZRR
+def calibrate_fluxes(results, header):
+    magzpt = header["MAGZPT"]
+    magzrr = header["MAGZRR"]
 
-def calibrate_fluxes(results):
-    # Read zero point and its error from FITS header
-    magzpt = header['MAGZPT']
-    magzrr = header['MAGZRR']
-
-    print(f"Zero point: MAGZPT = {magzpt}, MAGZRR = {magzrr}")
+    print(f"Zero point: MAGZPT={magzpt}, MAGZRR={magzrr}")
 
     calibrated = []
-
-    for (x, y, _, net_flux, _, _) in results:
-
-        # m = ZP_inst + mag_i = ZP_inst - 2.5 * log10(counts)
+    for (x, y, _peak, net_flux, _bg_per_pixel, _radius) in results:
+        if net_flux <= 0:
+            continue
         mag = magzpt - 2.5 * np.log10(net_flux)
         mag_err = magzrr
-
-        calibrated.append((x, y, net_flux, mag, mag_err))
+        calibrated.append((x, y, net_flux, float(mag), float(mag_err)))
 
     print(f"Calibrated {len(calibrated)} sources")
-
     return calibrated
 
-# =============================================================================
-# Section 5.6: Producing the Catalogue
-# =============================================================================
 
-# COMPLETED:
-# - Combine photometry results with calibrated magnitudes
-# - Save ASCII catalogue with: x, y, peak, net_flux, bg_per_pixel, magnitude, mag_error
-# - Use numpy.savetxt for clean formatted output
-
-def produce_catalogue(results, calibrated):
-    # Look up peak value and background from photometry results
+def produce_catalogue(results, calibrated, out_path="catalogue.csv"):
     result_lookup = {(x, y): (peak, bg_per_pixel) for (x, y, peak, _, bg_per_pixel, _) in results}
 
     rows = []
     for (x, y, net_flux, mag, mag_err) in calibrated:
+        if (x, y) not in result_lookup:
+            continue
         peak, bg_per_pixel = result_lookup[(x, y)]
         rows.append([x, y, peak, net_flux, bg_per_pixel, mag, mag_err])
 
-    catalogue = np.array(rows)
+    catalogue = np.array(rows, dtype=float) if rows else np.empty((0, 7), dtype=float)
 
-    np.savetxt('catalogue.csv', catalogue,
-               header='x  y  peak_value  net_flux  bg_per_pixel  magnitude  mag_error',
-               fmt=['%d', '%d', '%.2f', '%.2f', '%.2f', '%.4f', '%.4f'])
+    np.savetxt(
+        out_path,
+        catalogue,
+        header="x  y  peak_value  net_flux  bg_per_pixel  magnitude  mag_error",
+        fmt=["%d", "%d", "%.2f", "%.6f", "%.2f", "%.4f", "%.4f"],
+    )
 
-    print(f"Catalogue saved: {len(catalogue)} sources to catalogue.csv")
+    print(f"Catalogue saved: {len(catalogue)} sources to {out_path}")
+    return catalogue
+
 
 # =============================================================================
-# Section 5.7: Analyzing the Data
+# Number counts and area scaling
 # =============================================================================
 
-# COMPLETED:
-# - Calculate N(< m) vs m (cumulative number counts per deg²)
-# - Plot log(N) vs magnitude with Poisson error bars
-# - Overlay theoretical relation: log N(m) = 0.6m + constant
 
-def number_counts(calibrated):
-    # Extract magnitudes
-    mags = np.array([mag for (_, _, _, mag, _) in calibrated])
+def compute_areas_deg2(full_shape, tiles, pixel_scale, calibrated):
+    h, w = full_shape
+    analysed_mask = np.zeros((h, w), dtype=bool)
+    for (y0, y1, x0, x1) in tiles:
+        analysed_mask[y0:y1, x0:x1] = True
 
-    # Image area in square degrees
-    pixel_scale = 0.258  # arcsec per pixel
-    height, width = data.shape
-    area_deg2 = height * width * pixel_scale**2 / 3600**2
+    analysed_pixels = int(np.count_nonzero(analysed_mask))
+    area_analysed_deg2 = analysed_pixels * (pixel_scale**2) / (3600.0**2)
+    counts_per_deg2 = len(calibrated) / area_analysed_deg2
 
-    print(f"Image area: {height} x {width} pixels = {area_deg2:.6f} deg²")
+    print(f"area_analysed_deg2 = {area_analysed_deg2:.6f}")
+    print(f"Counts per deg^2 in analysed area = {counts_per_deg2:.2f}")
 
-    # Magnitude bin edges (0.5 mag steps)
-    mag_bins = np.arange(np.floor(mags.min()), np.ceil(mags.max()) + 0.5, 0.5)
+    return area_analysed_deg2, counts_per_deg2
 
-    # Cumulative counts: N(< m) for each bin edge
-    N_cumulative = np.array([np.sum(mags <= m) for m in mag_bins])
+def number_counts(calibrated, full_shape, analysed_tiles, pixel_scale, fit_m_max=24.5):
+    """
+    Plot ALL log10 N(<m) per deg^2 points, but only FIT points with m <= fit_m_max.
+    Shades the excluded (m > fit_m_max) region in grey.
+    """
 
-    # Only keep bins with at least 1 source and magnitude <= 18
-    valid = (N_cumulative > 0) & (mag_bins <= 25)
-    mag_plot = mag_bins[valid]
-    N_raw = N_cumulative[valid]
+    if len(calibrated) == 0:
+        print("No calibrated sources for number counts.")
+        return None
 
-    # Poisson error bars propagated to log10: sigma_log10 = 1 / (sqrt(N) * ln(10))
-    log10_N = np.log10(N_raw)
-    log10_err = 1.0 / (np.sqrt(N_raw) * np.log(10))
+    mags = np.array([mag for (_, _, _, mag, _) in calibrated], dtype=float)
 
-    # Plot number counts
+    # Analysed area (deg^2)
+    area_analysed_deg2, counts_per_deg2 = compute_areas_deg2(
+        full_shape, analysed_tiles, pixel_scale, calibrated
+    )
+
+    # Magnitude bins (0.5 mag spacing)
+    mag_bins = np.arange(np.floor(mags.min()) - 0.5,
+                         np.ceil(mags.max()),
+                         0.5)
+
+    # Cumulative counts (raw) in analysed region
+    N_cumulative = np.array([np.sum(mags <= m) for m in mag_bins], dtype=float)
+
+    # Convert to per deg^2
+    N_per_deg2 = N_cumulative / area_analysed_deg2
+
+    # Keep bins with at least 1 source for plotting
+    plot_valid = (N_per_deg2 > 0)
+    mag_plot_all = mag_bins[plot_valid]
+    N_plot_all = N_per_deg2[plot_valid]
+    N_raw_all = N_cumulative[plot_valid]  # for Poisson errors
+
+    if mag_plot_all.size == 0:
+        print("No valid bins for number counts plot.")
+        return None
+
+    log10_N_all = np.log10(N_plot_all)
+    log10_err_all = 1.0 / (np.sqrt(N_raw_all) * np.log(10))
+
+    # Subset used for fitting only
+    fit_mask = mag_plot_all <= fit_m_max
+    x = mag_plot_all[fit_mask]
+    y = log10_N_all[fit_mask]
+    sigma_y = log10_err_all[fit_mask]
+
+    if x.size < 2:
+        print("Not enough points for a fit (need at least 2 bins with m <= fit_m_max).")
+        return None
+
+    # Weighted least squares fit + uncertainties
+    w = 1.0 / (sigma_y**2)
+    xbar = np.sum(w * x) / np.sum(w)
+    Sxx = np.sum(w * (x - xbar)**2)
+
+    gradient = np.sum(w * (x - xbar) * y) / Sxx
+    intercept = (np.sum(w * y) - gradient * np.sum(w * x)) / np.sum(w)
+
+    gradient_err = np.sqrt(1.0 / Sxx)
+    intercept_err = np.sqrt(1.0 / np.sum(w) + xbar**2 / Sxx)
+
+    # Plot
     plt.figure()
-    plt.errorbar(mag_plot, log10_N, yerr=log10_err, fmt='ko', markersize=4, label='Observed')
 
-    # Fit a straight line to the weighted data: log10(N) = gradient * m + intercept
-    w = 1.0 / log10_err                      # weights for polyfit are 1/sigma
-    gradient, intercept = np.polyfit(mag_plot, log10_N, 1, w=w)
-    print(f"Measured gradient: {gradient:.4f} (theoretical: 0.6)")
+    # Grey-out the region not used in the fit
+    x_max = mag_plot_all.max()
+    if x_max > fit_m_max:
+        plt.axvspan(fit_m_max, x_max, color="0.9", zorder=0,
+                    label="Excluded from fit")
 
-    # Theoretical relation: log10(N) = 0.6m + constant
-    mid = len(mag_plot) // 2
-    constant = log10_N[mid] - 0.6 * mag_plot[mid]
-    mag_theory = np.linspace(mag_plot[0], mag_plot[-1], 100)
-    plt.plot(mag_theory, 0.6 * mag_theory + constant, 'r--', label='Theory: 0.6m + const')
-    plt.plot(mag_theory, gradient * mag_theory + intercept, 'b--', label=f'Fit: {gradient:.4f}m + const')
+    # All points (including those excluded)
+    plt.errorbar(mag_plot_all, log10_N_all, yerr=log10_err_all,
+                 fmt="ko", markersize=4,
+                 label="Observed (per deg$^2$)")
 
-    plt.xlabel('Magnitude')
-    plt.ylabel('log$_{10}$(N(< m))')
+    # Fit line only over the fitted range
+    x_fit_line = np.linspace(x.min(), x.max(), 200)
+    plt.plot(x_fit_line, gradient * x_fit_line + intercept, color = "cyan",
+             label=f"Fit: slope = {gradient:.4f}")
+
+    # Euclidean reference slope 0.6, normalised to match near mid of fitted range
+    mid = len(x) // 2
+    constant = y[mid] - 0.6 * x[mid]
+    plt.plot(x_fit_line, 0.6 * x_fit_line + constant, color = "red",
+             label="Theory: slope = 0.6")
+    plt.rcParams['font.family'] = 'Times New Roman'
+    plt.xlabel("Magnitude", fontsize=14)
+    plt.ylabel("log$_{10}$(N(< m)) per deg$^2$", fontsize=14)
+    plt.xticks(fontsize=14)
+    plt.yticks(fontsize=14)
+    plt.xlim(right=27.5)
     plt.legend()
-    plt.title('Cumulative Number Counts')
 
-    print(f"Magnitude range: {mags.min():.2f} to {mags.max():.2f}")
+    print(f"Measured gradient (fit m <= {fit_m_max:g}): {gradient:.4f} ± {gradient_err:.4f} mag^-1")
+    print(f"Intercept: {intercept:.4f} ± {intercept_err:.4f}")
+    print(f"Area analysed: {area_analysed_deg2:.6f} deg^2")
+    print(f"Counts per deg^2 (all sources): {counts_per_deg2:.2f}")
+    print(f"Magnitude range (all sources): {mags.min():.2f} to {mags.max():.2f}")
+
+    return {
+        "mag_plot_all": mag_plot_all,
+        "log10_N_all": log10_N_all,
+        "log10_err_all": log10_err_all,
+        "fit_m_max": fit_m_max,
+        "gradient": gradient,
+        "gradient_err": gradient_err,
+        "intercept": intercept,
+        "intercept_err": intercept_err,
+        "area_analysed_deg2": area_analysed_deg2,
+        "counts_per_deg2": counts_per_deg2,
+    }
 
 def number_counts_histogram(calibrated):
+    if len(calibrated) == 0:
+        print("No calibrated sources for histogram.")
+        return
+
     detected_mags = np.array([mag for (_, _, _, mag, _) in calibrated])
 
     plt.figure()
-
     mag_bins = np.arange(np.floor(detected_mags.min()), np.ceil(detected_mags.max()) + 0.5, 0.5)
-    plt.hist(detected_mags, bins=mag_bins, color='steelblue',
-             label=f'Detected ({len(detected_mags)} sources)')
-    plt.title('Number Counts per Magnitude Bin')
-
-    plt.xlabel('Magnitude')
-    plt.ylabel('Number of sources')
+    plt.hist(
+        detected_mags,
+        bins=mag_bins,
+        color="steelblue",
+        label=f"Detected ({len(detected_mags)} sources)",
+    )
+    plt.title("Number Counts per Magnitude Bin")
+    plt.xlabel("Magnitude")
+    plt.ylabel("Number of sources")
     plt.legend()
 
+
 # =============================================================================
-# Source Detection Visualization
+# Visualisation
 # =============================================================================
 
-# COMPLETED:
-# - Create a 2D image marking detected source positions
-# - Overlay detection map on original image for visual comparison
-# - Show which sources were detected and their spatial distribution
 
-def visualise_sources(sources, calibrated):
-    height, width = data.shape
+def visualise_sources(full_data, sources):
+    height, width = full_data.shape
 
-    # Create figure with subplots
     _, axes = plt.subplots(1, 3, figsize=(16, 5))
 
-    # Plot 1: Original image with histogram equalization
-    norm = ImageNormalize(data, stretch=HistEqStretch(data))
-    axes[0].imshow(data, cmap='gray', origin='lower', norm=norm)
-    axes[0].set_title('Original Image')
-    axes[0].set_xlabel('X (pixels)')
-    axes[0].set_ylabel('Y (pixels)')
+    norm = ImageNormalize(full_data, stretch=HistEqStretch(full_data))
+    axes[0].imshow(full_data, cmap="gray", origin="lower", norm=norm)
+    axes[0].set_title("Original Image")
+    axes[0].set_xlabel("X (pixels)")
+    axes[0].set_ylabel("Y (pixels)")
 
-    # Plot 2: Detected sources as white circles on black — binary detection map
     detection_map = np.zeros((height, width), dtype=float)
     for (x, y, _, r) in sources:
         ymin = max(0, y - r)
@@ -404,40 +505,106 @@ def visualise_sources(sources, calibrated):
         xmin = max(0, x - r)
         xmax = min(width, x + r + 1)
         yy, xx = np.ogrid[ymin:ymax, xmin:xmax]
-        dist = np.sqrt((xx - x)**2 + (yy - y)**2)
+        dist = np.sqrt((xx - x) ** 2 + (yy - y) ** 2)
         detection_map[ymin:ymax, xmin:xmax][dist <= r] = 1.0
-    axes[1].imshow(detection_map, cmap='gray', origin='lower', vmin=0, vmax=1)
-    axes[1].set_title(f'Detected Sources (n={len(sources)})')
-    axes[1].set_xlabel('X (pixels)')
-    axes[1].set_ylabel('Y (pixels)')
 
-    # Plot 3: Original image with point markers at source centres
-    axes[2].imshow(data, cmap='gray', origin='lower', norm=norm)
+    axes[1].imshow(detection_map, cmap="gray", origin="lower", vmin=0, vmax=1)
+    axes[1].set_title(f"Detected Sources (n={len(sources)})")
+    axes[1].set_xlabel("X (pixels)")
+    axes[1].set_ylabel("Y (pixels)")
+
+    axes[2].imshow(full_data, cmap="gray", origin="lower", norm=norm)
     if len(sources) > 0:
         src_x = np.array([s[0] for s in sources])
         src_y = np.array([s[1] for s in sources])
-        axes[2].plot(src_x, src_y, 'r+', markersize=5, markeredgewidth=0.5, label=f'Detected ({len(sources)})')
+        axes[2].plot(src_x, src_y, "r+", markersize=5, markeredgewidth=0.5, label=f"Detected ({len(sources)})")
         axes[2].legend()
-    axes[2].set_title('Overlay: Original + Detections')
-    axes[2].set_xlabel('X (pixels)')
-    axes[2].set_ylabel('Y (pixels)')
+    axes[2].set_title("Overlay: Original + Detections")
+    axes[2].set_xlabel("X (pixels)")
+    axes[2].set_ylabel("Y (pixels)")
 
     plt.tight_layout()
+    print(f"Visualisation created: {len(sources)} merged sources")
 
-    print(f"\nVisualisation created: {len(sources)} sources detected")
 
 # =============================================================================
-# Running Code
+# Pipeline driver with caching
 # =============================================================================
 
-#fit_gaussian()
-mu, sigma = fit_gaussian(data)
-#sources, mu, sigma = detect_sources(mu, sigma)
-#results = aperture_photometry(sources, mu, sigma)
-#calibrated = calibrate_fluxes(results)
-#produce_catalogue(results, calibrated)
-#number_counts(calibrated)
-#number_counts_histogram(calibrated)
-#visualise_sources(sources, calibrated)
 
-plt.show()
+def run(tasks, full_data, header, tiles, cache=None, merge_dist=8.0, pixel_scale=0.258):
+    if cache is None:
+        cache = {}
+
+    requested = set(tasks)
+    need_detect = bool(requested & {"detect", "catalogue", "counts", "hist", "vis"})
+
+    if need_detect and "merged_sources" not in cache:
+        valid_tiles = validate_tiles(tiles, full_data.shape)
+        print_tile_summary(valid_tiles)
+        tile_stats, all_global_sources = detect_sources_on_tiles(full_data, valid_tiles)
+        merged_sources = merge_sources(all_global_sources, merge_dist=merge_dist)
+
+        cache["tiles_valid"] = valid_tiles
+        cache["tile_stats"] = tile_stats
+        cache["all_global_sources"] = all_global_sources
+        cache["merged_sources"] = merged_sources
+
+    need_phot = bool(requested & {"catalogue", "counts", "hist"})
+    if need_phot and "photometry" not in cache:
+        if "merged_sources" not in cache:
+            raise RuntimeError("Merged sources missing; run detection first.")
+
+        tile_stats = cache.get("tile_stats", [])
+        if len(tile_stats) > 0:
+            fallback_mu = float(np.mean([s["mu"] for s in tile_stats]))
+        else:
+            fallback_mu = float(np.median(full_data))
+
+        phot = aperture_photometry(full_data, cache["merged_sources"], fallback_mu=fallback_mu)
+        cache["photometry"] = phot
+
+    need_cal = bool(requested & {"catalogue", "counts", "hist"})
+    if need_cal and "calibrated" not in cache:
+        if "photometry" not in cache:
+            raise RuntimeError("Photometry missing; run detection/photometry first.")
+        cache["calibrated"] = calibrate_fluxes(cache["photometry"], header)
+
+    if "catalogue" in requested:
+        if "catalogue" not in cache:
+            cache["catalogue"] = produce_catalogue(cache["photometry"], cache["calibrated"], out_path="catalogue.csv")
+
+    if "counts" in requested:
+        cache["number_counts"] = number_counts(
+            cache["calibrated"],
+            full_shape=full_data.shape,
+            analysed_tiles=cache["tiles_valid"],
+            pixel_scale=pixel_scale,
+        )
+
+    if "hist" in requested:
+        number_counts_histogram(cache["calibrated"])
+
+    if "vis" in requested:
+        visualise_sources(full_data, cache["merged_sources"])
+
+    return cache
+
+
+# =============================================================================
+# Main
+# =============================================================================
+
+
+def main():
+    with fits.open(FITS_PATH) as hdulist:
+        full_data = hdulist[0].data
+        header = hdulist[0].header
+
+    cache = {}
+    run(TASKS, full_data, header, TILES, cache=cache, merge_dist=MERGE_DIST, pixel_scale=PIXEL_SCALE)
+    plt.show()
+
+
+if __name__ == "__main__":
+    main()

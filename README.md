@@ -2,11 +2,7 @@
 
 *[日本語はこちら / Japanese version below](#日本語版)*
 
-<p align="center">
-  <img src="Figures/tiles_visualise.png" alt="The sky image with the analysed regions outlined in cyan" width="650"/>
-</p>
-
-## What is this?
+## Overview
 
 This project takes a real photograph of deep space (taken with the 4-metre telescope at Kitt Peak Observatory, USA) and answers a simple-sounding question: **how many galaxies are in this picture, and how bright is each one?**
 
@@ -14,7 +10,13 @@ That's harder than it sounds. The image contains thousands of faint smudges of l
 
 ### Step 1 — Choose which parts of the image to trust
 
-The raw image has damaged areas: a huge star in the upper centre bleeds a vertical line across the whole frame, and the edges are noisier because fewer exposures cover them. Rather than let those areas pollute the results, I hand-picked 8 rectangular regions (the cyan boxes in the image above) that avoid the bright star, the bleed lines, and the noisy edges. Everything else in the analysis happens inside those boxes only.
+<p align="center">
+  <img src="Figures/tiles_visualise.png" alt="The sky image with the analysed regions outlined in cyan" width="650"/>
+</p>
+
+*The 8 regions actually analysed, outlined in cyan, avoiding the bright star, its bleed line, and the noisy edges of the image.*
+
+The raw image has damaged areas: a huge star in the upper centre bleeds a vertical line across the whole frame, and the edges are noisier because fewer exposures cover them. Rather than let those areas pollute the results, I hand-picked 8 rectangular regions (the cyan boxes above) that avoid the bright star, the bleed lines, and the noisy edges. Everything else in the analysis happens inside those boxes only.
 
 ### Step 2 — Measure the background
 
@@ -85,11 +87,7 @@ The full write-up (method, results, error analysis) is in [`report.pdf`](report.
 
 <a name="日本語版"></a>
 
-## これは何？
-
-<p align="center">
-  <img src="Figures/tiles_visualise.png" alt="解析対象領域をシアンで示した画像" width="650"/>
-</p>
+## 概要
 
 このプロジェクトは、実際の深宇宙の画像(アメリカ・キットピーク天文台の4m望遠鏡で撮影)を使って、シンプルに聞こえる問いに答えるものです。**この画像には銀河がいくつ写っていて、それぞれどのくらいの明るさなのか？**
 
@@ -97,7 +95,13 @@ The full write-up (method, results, error analysis) is in [`report.pdf`](report.
 
 ### ステップ1 — 画像のどの部分を信頼するかを選ぶ
 
-元の画像には損傷した領域があります。上部中央の非常に明るい星が画像全体に縦線状のにじみを作っており、端の部分は露光回数が少ないためノイズが多くなっています。これらが結果を汚染しないよう、明るい星・にじみ・ノイズの多い端を避けた8つの長方形領域(ページ上部の画像のシアンの枠)を手動で選びました。以降の解析はすべてこの枠内のみで行われます。
+<p align="center">
+  <img src="Figures/tiles_visualise.png" alt="解析対象領域をシアンで示した画像" width="650"/>
+</p>
+
+*実際に解析した8つの領域(シアンの枠)。明るい星とそのにじみ、ノイズの多い画像の端を避けています。*
+
+元の画像には損傷した領域があります。上部中央の非常に明るい星が画像全体に縦線状のにじみを作っており、端の部分は露光回数が少ないためノイズが多くなっています。これらが結果を汚染しないよう、明るい星・にじみ・ノイズの多い端を避けた8つの長方形領域(上の画像のシアンの枠)を手動で選びました。以降の解析はすべてこの枠内のみで行われます。
 
 ### ステップ2 — 背景を測定する
 

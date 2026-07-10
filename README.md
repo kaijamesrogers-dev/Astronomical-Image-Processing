@@ -3,7 +3,7 @@
 *[日本語はこちら / Japanese version below](#日本語版)*
 
 <p align="center">
-  <img src="figures/tiles_visualise.png" alt="The sky image with the analysed regions outlined in cyan" width="650"/>
+  <img src="Figures/tiles_visualise.png" alt="The sky image with the analysed regions outlined in cyan" width="650"/>
 </p>
 
 ## What is this?
@@ -29,7 +29,7 @@ The exact "when has the ring faded enough?" setting matters a lot — set it too
 For brightness, each galaxy's light is added up inside its measured radius, and the local background (measured in a ring around it, carefully excluding any other galaxies that fall in that ring) is subtracted. The result is converted to the standard astronomers' brightness scale (magnitudes) using a calibration value stored in the image file itself.
 
 <p align="center">
-  <img src="figures/src_detection_visualisation.png" alt="Left: the original image. Middle: everything the program detected. Right: detections overlaid on the original." width="800"/>
+  <img src="Figures/src_detection_visualisation.png" alt="Left: the original image. Middle: everything the program detected. Right: detections overlaid on the original." width="800"/>
 </p>
 
 *Left: the original image. Middle: every source the program found (n = 4867 — the dark rectangle is the excluded bright-star region). Right: the detections marked in red on top of the original.*
@@ -39,13 +39,13 @@ For brightness, each galaxy's light is added up inside its measured radius, and 
 With a catalogue of ~4,800 galaxies, I counted how many are brighter than each brightness level, and plotted how that count grows as you include fainter and fainter galaxies. A classic theoretical prediction says this count should grow at a specific rate (a slope of 0.6 on a log plot) if galaxies are spread uniformly through space.
 
 <p align="center">
-  <img src="figures/src_fit_and_slope.png" alt="Galaxy counts vs brightness: measured points, fitted line (slope 0.31), and the theoretical slope-0.6 line" width="700"/>
+  <img src="Figures/src_fit_and_slope.png" alt="Galaxy counts vs brightness: measured points, fitted line (slope 0.31), and the theoretical slope-0.6 line" width="700"/>
 </p>
 
 My measured slope came out at **0.307 ± 0.004** — noticeably shallower than the theoretical 0.6. The grey region on the right shows where the count flattens out entirely: the faintest galaxies become progressively harder to detect, so the survey misses more and more of them (this is called *incompleteness*), and those points are excluded from the fit. The gap between my slope and 0.6 even in the fitted range is dominated by systematic effects in the detection method — quantifying that difference, and working out where it comes from, was the point of the project.
 
 <p align="center">
-  <img src="figures/src_magnitude_bins.png" alt="Histogram of detected galaxies per brightness bin, peaking around magnitude 25" width="700"/>
+  <img src="Figures/src_magnitude_bins.png" alt="Histogram of detected galaxies per brightness bin, peaking around magnitude 25" width="700"/>
 </p>
 
 *How many galaxies were detected at each brightness. The peak around magnitude 25 followed by the sharp drop-off shows the detection limit of the survey — beyond this, galaxies exist but are too faint for the method to find.*

@@ -74,8 +74,6 @@ You'll need Python 3 and a few libraries:
 pip install -r requirements.txt
 ```
 
-You'll also need the image itself (`mosaic.fits`, ~23 MB) placed in the same folder — it's the deep survey image provided as part of Imperial College London's third-year lab course, so it isn't included in this repository.
-
 Then:
 
 ```
@@ -164,8 +162,6 @@ Python 3 といくつかのライブラリが必要です:
 ```
 pip install -r requirements.txt
 ```
-
-また、画像ファイル(`mosaic.fits`、約23MB)を同じフォルダに置く必要があります。これはインペリアル・カレッジ・ロンドンの3年次実験で提供されたデータのため、このリポジトリには含まれていません。
 
 ```
 python src.py              # フルパイプライン: 検出、測定、カタログ作成、プロット

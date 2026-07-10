@@ -85,7 +85,7 @@ python visualise_tiles.py  # show which regions of the image were analysed
 
 ## Report
 
-The full write-up (method, results, error analysis) is in [`report.pdf`](report.pdf).
+The full write-up (method, results, error analysis) is in [`report.pdf`](LabReport_AIP.pdf).
 
 ---
 
@@ -174,4 +174,4 @@ python visualise_tiles.py  # 解析に使用した領域の表示
 
 ## レポート
 
-詳細な手法・結果・誤差解析は [`report.pdf`](report.pdf) をご覧ください。
+詳細な手法・結果・誤差解析は [`report.pdf`](LabReport_AIP.pdf) をご覧ください。
